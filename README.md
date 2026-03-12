@@ -47,8 +47,15 @@ Toggle apps on or off to control which ones appear in the orbit ring. Hidden app
 ## Build from Terminal
 
 ```
-xcodegen generate
-xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Release -destination 'platform=macOS' build
+./build.sh
+```
+
+This builds a Release configuration and copies `Orbit.app` to the project root. You can then launch it with `open Orbit.app`.
+
+To build manually without the script:
+
+```
+xcodebuild -project Orbit.xcodeproj -scheme Orbit -configuration Release build
 ```
 
 The built app is in `~/Library/Developer/Xcode/DerivedData/Orbit-*/Build/Products/Release/Orbit.app`.
