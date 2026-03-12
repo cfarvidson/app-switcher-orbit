@@ -5,6 +5,7 @@ final class HotkeyService {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var mouseMonitor: Any?
+    private var localMouseMonitor: Any?
     private var retainedSelf = false
     private let callback: () -> Void
 
@@ -83,12 +84,24 @@ final class HotkeyService {
 
         let matching: NSEvent.EventTypeMask = button == 1 ? .rightMouseDown : .otherMouseDown
 
+        // Global monitor: fires when other apps are focused
         mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { [weak self] event in
             if event.buttonNumber == button {
                 DispatchQueue.main.async {
                     self?.callback()
                 }
             }
+        }
+
+        // Local monitor: fires when our overlay panel is key
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: matching) { [weak self] event in
+            if event.buttonNumber == button {
+                DispatchQueue.main.async {
+                    self?.callback()
+                }
+                return nil
+            }
+            return event
         }
 
         return mouseMonitor != nil
@@ -123,6 +136,10 @@ final class HotkeyService {
         if let monitor = mouseMonitor {
             NSEvent.removeMonitor(monitor)
             mouseMonitor = nil
+        }
+        if let monitor = localMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMouseMonitor = nil
         }
     }
 
