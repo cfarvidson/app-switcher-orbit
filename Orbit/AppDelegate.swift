@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -6,12 +7,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayPanel: OverlayPanel?
     private var hotkeyService: HotkeyService!
     private let viewModel = OrbitViewModel()
+    private let settings = SettingsService.shared
+    private var cancellables = Set<AnyCancellable>()
+    private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         promptAccessibilityIfNeeded()
         setupStatusItem()
         setupHotkey()
         setupOverlayPanel()
+        observeSettingsChanges()
 
         viewModel.onDismiss = { [weak self] in
             self?.overlayPanel?.hideOverlay()
@@ -36,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(
+            NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ",")
+        )
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(
             NSMenuItem(title: "About Orbit", action: #selector(showAbout), keyEquivalent: "")
         )
         menu.addItem(NSMenuItem.separator())
@@ -53,14 +62,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyService = HotkeyService { [weak self] in
             self?.toggleOrbit()
         }
-        if !hotkeyService.register() {
-            NSLog("Orbit: Hotkey registration failed. The app may not respond to Option+Space.")
-        }
+        hotkeyService.registerFromSettings(settings)
     }
 
     private func setupOverlayPanel() {
         let orbitView = OrbitView(viewModel: viewModel)
         overlayPanel = OverlayPanel(contentView: orbitView)
+    }
+
+    private func observeSettingsChanges() {
+        // Re-register hotkey when shortcut settings change
+        settings.$triggerType
+            .combineLatest(settings.$keyCode, settings.$modifiers, settings.$mouseButton)
+            .dropFirst() // Skip initial values
+            .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
+            .sink { [weak self] _, _, _, _ in
+                guard let self else { return }
+                self.hotkeyService.registerFromSettings(self.settings)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Orbit control
@@ -75,7 +95,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - Settings window
+
+    @objc private func openSettings() {
+        if let window = settingsWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 380),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Orbit Settings"
+        window.contentView = NSHostingView(rootView: SettingsView())
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate()
+        settingsWindow = window
+    }
+
     @objc private func showAbout() {
         NSApp.orderFrontStandardAboutPanel(nil)
+        NSApp.activate()
     }
 }

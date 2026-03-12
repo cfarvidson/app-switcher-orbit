@@ -20,7 +20,8 @@ final class OrbitViewModel: ObservableObject {
     }
 
     func show() {
-        apps = AppService.runningApps()
+        let excluded = SettingsService.shared.excludedBundleIds
+        apps = AppService.runningApps(excluding: excluded)
         selectedIndex = nil
         isVisible = true
         startEscMonitor()

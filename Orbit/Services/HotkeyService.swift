@@ -4,13 +4,20 @@ import AppKit
 final class HotkeyService {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
+    private var mouseMonitor: Any?
+    private var retainedSelf = false
     private let callback: () -> Void
 
     init(callback: @escaping () -> Void) {
         self.callback = callback
     }
 
-    func register() -> Bool {
+    // MARK: - Keyboard hotkey
+
+    @discardableResult
+    func registerKeyboard(keyCode: UInt32, modifiers: UInt32) -> Bool {
+        unregister()
+
         var hotKeyID = EventHotKeyID()
         hotKeyID.signature = OSType(
             UInt32(UInt8(ascii: "O")) << 24 |
@@ -25,8 +32,8 @@ final class HotkeyService {
             eventKind: UInt32(kEventHotKeyPressed)
         )
 
-        // Retained to prevent dangling pointer in the Carbon callback
         let selfPtr = Unmanaged.passRetained(self).toOpaque()
+        retainedSelf = true
 
         let handlerStatus = InstallEventHandler(
             GetApplicationEventTarget(),
@@ -46,13 +53,14 @@ final class HotkeyService {
 
         guard handlerStatus == noErr else {
             Unmanaged<HotkeyService>.fromOpaque(selfPtr).release()
+            retainedSelf = false
             NSLog("Orbit: Failed to install event handler (status: \(handlerStatus))")
             return false
         }
 
         let hotkeyStatus = RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(optionKey),
+            keyCode,
+            modifiers,
             hotKeyID,
             GetApplicationEventTarget(),
             0,
@@ -60,12 +68,44 @@ final class HotkeyService {
         )
 
         guard hotkeyStatus == noErr else {
-            NSLog("Orbit: Failed to register hotkey Option+Space (status: \(hotkeyStatus))")
+            NSLog("Orbit: Failed to register hotkey (status: \(hotkeyStatus))")
             return false
         }
 
         return true
     }
+
+    // MARK: - Mouse button
+
+    @discardableResult
+    func registerMouseButton(_ button: Int) -> Bool {
+        unregister()
+
+        let matching: NSEvent.EventTypeMask = button == 1 ? .rightMouseDown : .otherMouseDown
+
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { [weak self] event in
+            if event.buttonNumber == button {
+                DispatchQueue.main.async {
+                    self?.callback()
+                }
+            }
+        }
+
+        return mouseMonitor != nil
+    }
+
+    // MARK: - Registration from settings
+
+    func registerFromSettings(_ settings: SettingsService) {
+        switch settings.triggerType {
+        case .keyboard:
+            registerKeyboard(keyCode: settings.keyCode, modifiers: settings.modifiers)
+        case .mouseButton:
+            registerMouseButton(settings.mouseButton)
+        }
+    }
+
+    // MARK: - Cleanup
 
     func unregister() {
         if let ref = hotKeyRef {
@@ -75,8 +115,14 @@ final class HotkeyService {
         if let ref = eventHandlerRef {
             RemoveEventHandler(ref)
             eventHandlerRef = nil
-            // Balance the passRetained from register()
-            Unmanaged.passUnretained(self).release()
+            if retainedSelf {
+                Unmanaged.passUnretained(self).release()
+                retainedSelf = false
+            }
+        }
+        if let monitor = mouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseMonitor = nil
         }
     }
 
