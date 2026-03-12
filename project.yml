@@ -1,0 +1,31 @@
+name: Orbit
+options:
+  bundleIdPrefix: com.orbit
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+targets:
+  Orbit:
+    type: application
+    platform: macOS
+    sources:
+      - path: Orbit
+        excludes:
+          - "**/*.entitlements"
+    settings:
+      base:
+        CODE_SIGN_ENTITLEMENTS: Orbit/Resources/Orbit.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.appswitcher
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        INFOPLIST_FILE: Orbit/Info.plist
+        COMBINE_HIDPI_IMAGES: true
+        CODE_SIGN_IDENTITY: "-"
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
