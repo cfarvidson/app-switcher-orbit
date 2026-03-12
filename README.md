@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" width="128" height="128" alt="Orbit logo">
+</p>
+
 # Orbit
 
 A macOS radial app switcher inspired by Hitman's weapon wheel. Press a shortcut to summon a circle of running apps around your mouse cursor, hover to select, click to switch.
@@ -51,20 +55,20 @@ The built app is in `~/Library/Developer/Xcode/DerivedData/Orbit-*/Build/Product
 
 ## Architecture
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| Entry point | `OrbitApp.swift` | SwiftUI @main with NSApplicationDelegateAdaptor |
-| Orchestration | `AppDelegate.swift` | Menu bar, hotkey wiring, settings window, overlay lifecycle |
-| Global hotkey | `HotkeyService.swift` | Carbon RegisterEventHotKey + NSEvent mouse monitors |
-| App detection | `AppService.swift` | NSWorkspace running GUI apps with exclusion filtering |
-| Overlay window | `OverlayPanel.swift` | Non-activating floating NSPanel with screen clamping |
-| State | `OrbitViewModel.swift` | Selection logic, angle math, ESC/click monitors |
-| Circular UI | `OrbitView.swift` | SwiftUI radial layout with hover tracking |
-| App icon | `AppIconView.swift` | Icon with selection glow and scale animation |
-| Settings | `SettingsService.swift` | UserDefaults persistence for shortcuts and exclusions |
-| Settings UI | `SettingsView.swift` | Tab view for shortcut config and app filtering |
-| Shortcut recorder | `ShortcutRecorderView.swift` | Captures keyboard shortcut via NSEvent monitor |
-| Model | `RunningApp.swift` | Wraps NSRunningApplication |
+| Component         | File                         | Purpose                                                     |
+| ----------------- | ---------------------------- | ----------------------------------------------------------- |
+| Entry point       | `OrbitApp.swift`             | SwiftUI @main with NSApplicationDelegateAdaptor             |
+| Orchestration     | `AppDelegate.swift`          | Menu bar, hotkey wiring, settings window, overlay lifecycle |
+| Global hotkey     | `HotkeyService.swift`        | Carbon RegisterEventHotKey + NSEvent mouse monitors         |
+| App detection     | `AppService.swift`           | NSWorkspace running GUI apps with exclusion filtering       |
+| Overlay window    | `OverlayPanel.swift`         | Non-activating floating NSPanel with screen clamping        |
+| State             | `OrbitViewModel.swift`       | Selection logic, angle math, ESC/click monitors             |
+| Circular UI       | `OrbitView.swift`            | SwiftUI radial layout with hover tracking                   |
+| App icon          | `AppIconView.swift`          | Icon with selection glow and scale animation                |
+| Settings          | `SettingsService.swift`      | UserDefaults persistence for shortcuts and exclusions       |
+| Settings UI       | `SettingsView.swift`         | Tab view for shortcut config and app filtering              |
+| Shortcut recorder | `ShortcutRecorderView.swift` | Captures keyboard shortcut via NSEvent monitor              |
+| Model             | `RunningApp.swift`           | Wraps NSRunningApplication                                  |
 
 ## License
 
