@@ -14,6 +14,7 @@ final class OrbitViewModel: ObservableObject {
 
     private var escMonitor: Any?
     private var globalEscMonitor: Any?
+    private var globalClickMonitor: Any?
 
     var center: CGPoint {
         CGPoint(x: orbitSize / 2, y: orbitSize / 2)
@@ -24,7 +25,7 @@ final class OrbitViewModel: ObservableObject {
         apps = AppService.runningApps(excluding: excluded)
         selectedIndex = nil
         isVisible = true
-        startEscMonitor()
+        startMonitors()
     }
 
     func dismiss() {
@@ -71,14 +72,14 @@ final class OrbitViewModel: ObservableObject {
             return
         }
 
-        let angle = atan2(-dy, dx)
+        let mouseAngle = normalizeAngle(atan2(-dy, dx))
 
         var closestIndex = 0
         var closestDiff = Double.infinity
 
         for i in 0..<apps.count {
-            let appAngle = angleForIndex(i)
-            var diff = abs(angle - appAngle)
+            let appAngle = normalizeAngle(angleForIndex(i))
+            var diff = abs(mouseAngle - appAngle)
             if diff > Double.pi {
                 diff = 2 * Double.pi - diff
             }
@@ -91,9 +92,17 @@ final class OrbitViewModel: ObservableObject {
         selectedIndex = closestIndex
     }
 
-    // MARK: - ESC monitoring
+    /// Normalize angle to [0, 2π)
+    private func normalizeAngle(_ angle: Double) -> Double {
+        var a = angle.truncatingRemainder(dividingBy: 2 * Double.pi)
+        if a < 0 { a += 2 * Double.pi }
+        return a
+    }
 
-    private func startEscMonitor() {
+    // MARK: - Event monitors
+
+    private func startMonitors() {
+        // ESC to dismiss (local + global)
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 {
                 self?.dismiss()
@@ -106,6 +115,11 @@ final class OrbitViewModel: ObservableObject {
                 self?.dismiss()
             }
         }
+
+        // Click outside to dismiss (global monitor fires for clicks on other apps)
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+            self?.dismiss()
+        }
     }
 
     private func stopMonitors() {
@@ -116,6 +130,10 @@ final class OrbitViewModel: ObservableObject {
         if let monitor = globalEscMonitor {
             NSEvent.removeMonitor(monitor)
             globalEscMonitor = nil
+        }
+        if let monitor = globalClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalClickMonitor = nil
         }
     }
 }

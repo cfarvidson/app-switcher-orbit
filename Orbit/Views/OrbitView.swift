@@ -6,11 +6,12 @@ struct OrbitView: View {
     var body: some View {
         ZStack {
             if viewModel.isVisible {
-                // Background blur circle
+                // Background blur circle (tap to dismiss)
                 Circle()
                     .fill(.ultraThinMaterial)
                     .frame(width: viewModel.orbitSize - 40, height: viewModel.orbitSize - 40)
                     .opacity(0.9)
+                    .onTapGesture { viewModel.dismiss() }
 
                 // Inner ring
                 Circle()
