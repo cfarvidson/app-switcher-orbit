@@ -164,7 +164,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
-        NSApp.orderFrontStandardAboutPanel(nil)
+        let credits = NSMutableAttributedString()
+        credits.append(NSAttributedString(
+            string: "By Carl-Fredrik Arvidson\n",
+            attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium)]
+        ))
+        credits.append(NSAttributedString(
+            string: "carl-fredrik.arvidson.io",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .link: URL(string: "https://carl-fredrik.arvidson.io")!,
+            ]
+        ))
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .credits: credits,
+        ])
         NSApp.activate()
     }
 }
