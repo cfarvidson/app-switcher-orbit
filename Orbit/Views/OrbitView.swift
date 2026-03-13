@@ -66,14 +66,14 @@ struct OrbitView: View {
         }
         .frame(width: viewModel.orbitSize, height: viewModel.orbitSize)
         .animation(.easeOut(duration: 0.2), value: viewModel.isVisible)
-        .animation(.easeInOut(duration: 0.1), value: viewModel.selectedIndex)
+        .animation(.interpolatingSpring(stiffness: 300, damping: 25), value: viewModel.selectedIndex)
         .contentShape(Rectangle())
         .onContinuousHover { phase in
             switch phase {
             case .active(let location):
                 viewModel.updateSelection(mouseInView: location)
             case .ended:
-                viewModel.selectedIndex = nil
+                viewModel.handleHoverEnded()
             }
         }
     }

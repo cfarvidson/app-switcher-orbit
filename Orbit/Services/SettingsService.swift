@@ -10,7 +10,13 @@ final class SettingsService: ObservableObject {
         case mouseButton
     }
 
+    enum InputMode: String, CaseIterable {
+        case mouse
+        case trackpad
+    }
+
     @Published var triggerType: TriggerType
+    @Published var inputMode: InputMode
     @Published var keyCode: UInt32
     @Published var modifiers: UInt32
     @Published var keyDisplayName: String
@@ -22,6 +28,8 @@ final class SettingsService: ObservableObject {
     private init() {
         let storedType = defaults.string(forKey: "triggerType") ?? "keyboard"
         triggerType = TriggerType(rawValue: storedType) ?? .keyboard
+        let storedInputMode = defaults.string(forKey: "inputMode") ?? "mouse"
+        inputMode = InputMode(rawValue: storedInputMode) ?? .mouse
         keyCode = defaults.object(forKey: "keyCode") != nil
             ? UInt32(defaults.integer(forKey: "keyCode"))
             : UInt32(kVK_Space)
@@ -37,6 +45,7 @@ final class SettingsService: ObservableObject {
 
     func save() {
         defaults.set(triggerType.rawValue, forKey: "triggerType")
+        defaults.set(inputMode.rawValue, forKey: "inputMode")
         defaults.set(Int(keyCode), forKey: "keyCode")
         defaults.set(Int(modifiers), forKey: "modifiers")
         defaults.set(keyDisplayName, forKey: "keyDisplayName")

@@ -21,6 +21,21 @@ struct SettingsView: View {
     private var shortcutTab: some View {
         Form {
             Section {
+                Picker("Input Mode", selection: $settings.inputMode) {
+                    Text("Mouse").tag(SettingsService.InputMode.mouse)
+                    Text("Trackpad").tag(SettingsService.InputMode.trackpad)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: settings.inputMode) { settings.save() }
+
+                Text(settings.inputMode == .mouse
+                    ? "Optimized for mouse. Hover to select, click to switch."
+                    : "Larger targets and sticky selection for trackpad use.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Picker("Activation Method", selection: $settings.triggerType) {
                     Text("Keyboard Shortcut").tag(SettingsService.TriggerType.keyboard)
                     Text("Mouse Button").tag(SettingsService.TriggerType.mouseButton)

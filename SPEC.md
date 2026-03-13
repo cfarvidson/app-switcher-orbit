@@ -142,6 +142,7 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 | Property          | Type                         | Default            | UserDefaults Key    |
 | ----------------- | ---------------------------- | ------------------ | ------------------- |
 | triggerType       | `.keyboard` / `.mouseButton` | `.keyboard`        | `triggerType`       |
+| inputMode         | `.mouse` / `.trackpad`       | `.mouse`           | `inputMode`         |
 | keyCode           | `UInt32`                     | `kVK_Space` (49)   | `keyCode`           |
 | modifiers         | `UInt32`                     | `optionKey` (2048) | `modifiers`         |
 | keyDisplayName    | `String`                     | `"Space"`          | `keyDisplayName`    |
@@ -159,13 +160,17 @@ All properties are `@Published`. The `save()` method writes all properties to Us
 
 `ObservableObject` managing the radial UI state.
 
-### Constants
+### Geometry (Snapshotted in `show()`)
 
-| Property  | Value |
-| --------- | ----- |
-| radius    | 140pt |
-| iconSize  | 56pt  |
-| orbitSize | 400pt |
+Geometry is snapshotted once per show to avoid reading SettingsService on every frame. Values depend on `InputMode`:
+
+| Property        | Mouse Mode | Trackpad Mode |
+| --------------- | ---------- | ------------- |
+| radius          | 140pt      | 180pt         |
+| iconSize        | 56pt       | 68pt          |
+| orbitSize       | 400pt      | 500pt         |
+| deadZone        | 35pt       | 45pt          |
+| stickySelection | false      | true          |
 
 ### Key Properties
 
@@ -182,17 +187,41 @@ All properties are `@Published`. The `save()` method writes all properties to Us
 
 ### Selection Logic (updateSelection)
 
-- Ignore if mouse is within 35pt of center (dead zone)
+- Ignore if mouse is within `deadZone` of center
 - Calculate mouse angle: `atan2(-dy, dx)`, normalized to [0, 2π)
 - Find the app whose angle is closest to the mouse angle (handling the 0/2π wrap)
 - Set `selectedIndex` to that app
+
+### Sticky Selection (handleHoverEnded)
+
+- In mouse mode: `selectedIndex` is cleared when the cursor leaves the panel
+- In trackpad mode: selection persists (sticky) — the view delegates this decision to `handleHoverEnded()` which checks the `stickySelection` flag
+
+### Scroll-to-Rotate (Both Modes)
+
+- Two-finger swipe or scroll wheel rotates the highlight around the ring
+- Uses `scrollingDeltaY` (not deprecated `deltaY`)
+- Accumulates scroll deltas; triggers selection change when accumulator exceeds threshold (3.0)
+- **Momentum filtering**: ignores inertial events (`event.momentumPhase != 0`) to prevent coasting
+- **Gesture boundary reset**: accumulator resets on `event.phase == .began`, `.ended`, `.cancelled`
+- **Time-gated debounce**: 60ms minimum interval between selection changes (~16/sec max)
+- **Carry remainder**: subtracts threshold from accumulator instead of zeroing for responsive feel
+
+### Arrow Key + Enter Navigation (Both Modes)
+
+- **Left arrow** (keyCode 123): move selection counterclockwise
+- **Right arrow** (keyCode 124): move selection clockwise
+- **Enter/Return** (keyCode 36): confirm selection (`selectAndSwitch()`)
+- Wraps around using modular arithmetic
 
 ### Event Monitors
 
 When visible, installs:
 
-- **Local + global keyDown** monitors for ESC (keyCode 53) → dismiss
+- **Local keyDown** monitor for ESC (keyCode 53) → dismiss, Left/Right arrows → cycle selection, Enter → confirm
+- **Global keyDown** monitor for ESC → dismiss
 - **Global leftMouseDown** monitor → dismiss (click outside)
+- **Local scrollWheel** monitor → scroll-to-rotate selection
 
 All monitors are removed on dismiss.
 
@@ -216,7 +245,8 @@ Layered inside a `ZStack`, only rendered when `viewModel.isVisible`:
 ### Interactions
 
 - `onContinuousHover` tracks mouse position and calls `viewModel.updateSelection(mouseInView:)`
-- Animations: `.easeOut(0.2)` on visibility, `.easeInOut(0.1)` on selection changes
+- On hover ended, delegates to `viewModel.handleHoverEnded()` (clears selection in mouse mode, preserves in trackpad mode)
+- Animations: `.easeOut(0.2)` on visibility, `.interpolatingSpring(stiffness: 300, damping: 25)` on selection changes (interruptible for rapid scroll/arrow input)
 
 ## AppIconView
 
@@ -236,7 +266,8 @@ A `TabView` with two tabs:
 
 ### Shortcut Tab
 
-- Segmented picker: Keyboard Shortcut vs Mouse Button
+- **Input Mode** segmented picker at top: Mouse vs Trackpad (with description text)
+- **Activation Method** segmented picker: Keyboard Shortcut vs Mouse Button
 - If keyboard: shows `ShortcutRecorderView`
 - If mouse: shows a picker with Middle Button, Button 4 (Back), Button 5 (Forward)
 - Uses `.formStyle(.grouped)`
@@ -303,6 +334,8 @@ Key entries:
 2. macOS prompts for Accessibility permissions on first launch
 3. User presses **Option+Space** (default) → overlay appears centered on mouse cursor
 4. Moving the mouse toward an app highlights it (glow + scale + dashed line from center)
-5. Clicking the highlighted app: overlay dismisses, then the app activates after 50ms
-6. Pressing ESC, clicking outside, or pressing the shortcut again dismisses without switching
-7. User can change the trigger (keyboard shortcut or mouse button) and filter apps via Settings
+5. User can also select apps via **scroll wheel / two-finger swipe** (rotates around the ring) or **arrow keys** (Left/Right)
+6. Clicking the highlighted app or pressing **Enter** confirms: overlay dismisses, then the app activates after 50ms
+7. Pressing ESC, clicking outside, or pressing the shortcut again dismisses without switching
+8. User can choose **Mouse** or **Trackpad** input mode in Settings — trackpad mode has larger targets and sticky selection
+9. User can change the trigger (keyboard shortcut or mouse button) and filter apps via Settings

@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 final class OrbitViewModel: ObservableObject {
@@ -8,19 +9,35 @@ final class OrbitViewModel: ObservableObject {
 
     var onDismiss: (() -> Void)?
 
-    let radius: CGFloat = 140
-    let iconSize: CGFloat = 56
-    let orbitSize: CGFloat = 400
+    private(set) var radius: CGFloat = 140
+    private(set) var iconSize: CGFloat = 56
+    private(set) var orbitSize: CGFloat = 400
+    private(set) var deadZone: CGFloat = 35
+    private(set) var stickySelection: Bool = false
 
     private var escMonitor: Any?
     private var globalEscMonitor: Any?
     private var globalClickMonitor: Any?
+
+    private var scrollAccumulator: CGFloat = 0
+    private var scrollMonitor: Any?
+    private var lastScrollSelectionTime: CFTimeInterval = 0
+    private let scrollSelectionMinInterval: CFTimeInterval = 0.06
 
     var center: CGPoint {
         CGPoint(x: orbitSize / 2, y: orbitSize / 2)
     }
 
     func show() {
+        let isTrackpad = SettingsService.shared.inputMode == .trackpad
+        radius = isTrackpad ? 180 : 140
+        iconSize = isTrackpad ? 68 : 56
+        orbitSize = isTrackpad ? 500 : 400
+        deadZone = isTrackpad ? 45 : 35
+        stickySelection = isTrackpad
+        scrollAccumulator = 0
+        lastScrollSelectionTime = 0
+
         let excluded = SettingsService.shared.excludedBundleIds
         apps = AppService.runningApps(excluding: excluded)
         selectedIndex = nil
@@ -67,7 +84,7 @@ final class OrbitViewModel: ObservableObject {
         let dy = Double(mouseInView.y - center.y)
         let distance = sqrt(dx * dx + dy * dy)
 
-        guard distance > 35, !apps.isEmpty else {
+        guard distance > Double(deadZone), !apps.isEmpty else {
             selectedIndex = nil
             return
         }
@@ -92,6 +109,28 @@ final class OrbitViewModel: ObservableObject {
         selectedIndex = closestIndex
     }
 
+    func handleHoverEnded() {
+        if !stickySelection {
+            selectedIndex = nil
+        }
+    }
+
+    func handleScroll(deltaY: CGFloat) {
+        guard !apps.isEmpty else { return }
+        scrollAccumulator += deltaY
+        let threshold: CGFloat = 3.0
+        guard abs(scrollAccumulator) > threshold else { return }
+
+        let now = CACurrentMediaTime()
+        guard now - lastScrollSelectionTime >= scrollSelectionMinInterval else { return }
+
+        let direction = scrollAccumulator > 0 ? -1 : 1
+        let current = selectedIndex ?? 0
+        selectedIndex = (current + direction + apps.count) % apps.count
+        scrollAccumulator -= CGFloat(scrollAccumulator > 0 ? 1 : -1) * threshold
+        lastScrollSelectionTime = now
+    }
+
     /// Normalize angle to [0, 2π)
     private func normalizeAngle(_ angle: Double) -> Double {
         var a = angle.truncatingRemainder(dividingBy: 2 * Double.pi)
@@ -102,13 +141,31 @@ final class OrbitViewModel: ObservableObject {
     // MARK: - Event monitors
 
     private func startMonitors() {
-        // ESC to dismiss (local + global)
+        // Keyboard navigation (local): ESC, arrows, Enter
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 {
-                self?.dismiss()
+            guard let self else { return event }
+            switch event.keyCode {
+            case 53: // ESC
+                self.dismiss()
                 return nil
+            case 123: // Left arrow
+                if !self.apps.isEmpty {
+                    let current = self.selectedIndex ?? 0
+                    self.selectedIndex = (current - 1 + self.apps.count) % self.apps.count
+                }
+                return nil
+            case 124: // Right arrow
+                if !self.apps.isEmpty {
+                    let current = self.selectedIndex ?? 0
+                    self.selectedIndex = (current + 1) % self.apps.count
+                }
+                return nil
+            case 36: // Return/Enter
+                self.selectAndSwitch()
+                return nil
+            default:
+                return event
             }
-            return event
         }
         globalEscMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 {
@@ -119,6 +176,22 @@ final class OrbitViewModel: ObservableObject {
         // Click outside to dismiss (global monitor fires for clicks on other apps)
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
             self?.dismiss()
+        }
+
+        // Scroll wheel for trackpad rotation
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else { return event }
+            if event.phase == .began {
+                self.scrollAccumulator = 0
+            }
+            guard event.momentumPhase == NSEvent.Phase(rawValue: 0) else {
+                return event
+            }
+            self.handleScroll(deltaY: event.scrollingDeltaY)
+            if event.phase == .ended || event.phase == .cancelled {
+                self.scrollAccumulator = 0
+            }
+            return event
         }
     }
 
@@ -134,6 +207,10 @@ final class OrbitViewModel: ObservableObject {
         if let monitor = globalClickMonitor {
             NSEvent.removeMonitor(monitor)
             globalClickMonitor = nil
+        }
+        if let monitor = scrollMonitor {
+            NSEvent.removeMonitor(monitor)
+            scrollMonitor = nil
         }
     }
 }
