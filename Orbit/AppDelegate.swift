@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var activationMenuItem: NSMenuItem?
     private var inputModeMenuItem: NSMenuItem?
+    private var lastToggleTime: Date = .distantPast
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         promptAccessibilityIfNeeded()
@@ -125,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Orbit control
 
     private func toggleOrbit() {
+        let now = Date()
+        guard now.timeIntervalSince(lastToggleTime) > 0.2 else { return }
+        lastToggleTime = now
+
         if viewModel.isVisible {
             viewModel.dismiss()
         } else {
