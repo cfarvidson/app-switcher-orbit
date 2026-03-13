@@ -87,7 +87,7 @@ A stateless enum with one static method:
 
 ## HotkeyService
 
-Supports two trigger modes:
+Supports three trigger modes:
 
 ### Keyboard Hotkey (Carbon API)
 
@@ -104,13 +104,17 @@ Supports two trigger modes:
 - Matches on `event.buttonNumber` — middle button = 2, button 4 = 3, button 5 = 4
 - For middle button, monitors `.otherMouseDown`; right mouse would use `.rightMouseDown`
 
+### Both Mode
+
+When `triggerType == .both`, registers both the keyboard hotkey AND mouse button monitors simultaneously. Either trigger opens Orbit. Uses targeted `unregisterKeyboard()` / `unregisterMouseButton()` helpers to avoid tearing down one trigger when re-registering the other.
+
 ### registerFromSettings
 
-Reads `SettingsService.triggerType` and calls either `registerKeyboard` or `registerMouseButton`.
+Reads `SettingsService.triggerType` and registers keyboard, mouse button, or both. Calls `unregister()` first to ensure a clean slate.
 
 ### Cleanup
 
-`unregister()` tears down whichever is active (hotkey ref, event handler, mouse monitors). Called from `deinit` and before every new registration.
+`unregister()` tears down all active triggers (hotkey ref, event handler, mouse monitors). Called from `deinit` and before every new registration. Targeted helpers `unregisterKeyboard()` and `unregisterMouseButton()` handle partial cleanup.
 
 ## OverlayPanel
 
@@ -141,7 +145,7 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 
 | Property          | Type                         | Default            | UserDefaults Key    |
 | ----------------- | ---------------------------- | ------------------ | ------------------- |
-| triggerType       | `.keyboard` / `.mouseButton` | `.keyboard`        | `triggerType`       |
+| triggerType       | `.keyboard` / `.mouseButton` / `.both` | `.keyboard` | `triggerType`       |
 | inputMode         | `.mouse` / `.trackpad`       | `.mouse`           | `inputMode`         |
 | keyCode           | `UInt32`                     | `kVK_Space` (49)   | `keyCode`           |
 | modifiers         | `UInt32`                     | `optionKey` (2048) | `modifiers`         |
@@ -267,9 +271,9 @@ A `TabView` with two tabs:
 ### Shortcut Tab
 
 - **Input Mode** segmented picker at top: Mouse vs Trackpad (with description text)
-- **Activation Method** segmented picker: Keyboard Shortcut vs Mouse Button
-- If keyboard: shows `ShortcutRecorderView`
-- If mouse: shows a picker with Middle Button, Button 4 (Back), Button 5 (Forward)
+- **Activation Method** segmented picker: Keyboard / Mouse Button / Both
+- If keyboard or both: shows `ShortcutRecorderView`
+- If mouse button or both: shows a picker with Middle Button, Button 4 (Back), Button 5 (Forward)
 - Uses `.formStyle(.grouped)`
 
 ### Apps Tab

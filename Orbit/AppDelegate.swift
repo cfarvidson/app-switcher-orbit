@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settings = SettingsService.shared
     private var cancellables = Set<AnyCancellable>()
     private var settingsWindow: NSWindow?
+    private var activationMenuItem: NSMenuItem?
+    private var inputModeMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         promptAccessibilityIfNeeded()
@@ -40,6 +42,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
+
+        let activation = NSMenuItem(title: activationDisplayString(), action: nil, keyEquivalent: "")
+        activation.isEnabled = false
+        menu.addItem(activation)
+        activationMenuItem = activation
+
+        let inputMode = NSMenuItem(title: inputModeDisplayString(), action: nil, keyEquivalent: "")
+        inputMode.isEnabled = false
+        menu.addItem(inputMode)
+        inputModeMenuItem = inputMode
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(
             NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ",")
         )
@@ -74,13 +88,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Re-register hotkey when shortcut settings change
         settings.$triggerType
             .combineLatest(settings.$keyCode, settings.$modifiers, settings.$mouseButton)
-            .dropFirst() // Skip initial values
+            .dropFirst()
             .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
             .sink { [weak self] _, _, _, _ in
                 guard let self else { return }
                 self.hotkeyService.registerFromSettings(self.settings)
+                self.activationMenuItem?.title = self.activationDisplayString()
             }
             .store(in: &cancellables)
+
+        // Update input mode menu item when it changes
+        settings.$inputMode
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.inputModeMenuItem?.title = self.inputModeDisplayString()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func activationDisplayString() -> String {
+        switch settings.triggerType {
+        case .keyboard:
+            return settings.shortcutDisplayString
+        case .mouseButton:
+            return settings.mouseButtonDisplayName
+        case .both:
+            return "\(settings.shortcutDisplayString) + \(settings.mouseButtonDisplayName)"
+        }
+    }
+
+    private func inputModeDisplayString() -> String {
+        settings.inputMode == .mouse ? "Mouse Mode" : "Trackpad Mode"
     }
 
     // MARK: - Orbit control

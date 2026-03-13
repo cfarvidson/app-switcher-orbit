@@ -17,7 +17,7 @@ final class HotkeyService {
 
     @discardableResult
     func registerKeyboard(keyCode: UInt32, modifiers: UInt32) -> Bool {
-        unregister()
+        unregisterKeyboard()
 
         var hotKeyID = EventHotKeyID()
         hotKeyID.signature = OSType(
@@ -80,7 +80,7 @@ final class HotkeyService {
 
     @discardableResult
     func registerMouseButton(_ button: Int) -> Bool {
-        unregister()
+        unregisterMouseButton()
 
         let matching: NSEvent.EventTypeMask = button == 1 ? .rightMouseDown : .otherMouseDown
 
@@ -110,17 +110,21 @@ final class HotkeyService {
     // MARK: - Registration from settings
 
     func registerFromSettings(_ settings: SettingsService) {
+        unregister()
         switch settings.triggerType {
         case .keyboard:
             registerKeyboard(keyCode: settings.keyCode, modifiers: settings.modifiers)
         case .mouseButton:
+            registerMouseButton(settings.mouseButton)
+        case .both:
+            registerKeyboard(keyCode: settings.keyCode, modifiers: settings.modifiers)
             registerMouseButton(settings.mouseButton)
         }
     }
 
     // MARK: - Cleanup
 
-    func unregister() {
+    private func unregisterKeyboard() {
         if let ref = hotKeyRef {
             UnregisterEventHotKey(ref)
             hotKeyRef = nil
@@ -133,6 +137,9 @@ final class HotkeyService {
                 retainedSelf = false
             }
         }
+    }
+
+    private func unregisterMouseButton() {
         if let monitor = mouseMonitor {
             NSEvent.removeMonitor(monitor)
             mouseMonitor = nil
@@ -141,6 +148,11 @@ final class HotkeyService {
             NSEvent.removeMonitor(monitor)
             localMouseMonitor = nil
         }
+    }
+
+    func unregister() {
+        unregisterKeyboard()
+        unregisterMouseButton()
     }
 
     deinit {

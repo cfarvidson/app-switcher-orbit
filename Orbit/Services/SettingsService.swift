@@ -8,6 +8,7 @@ final class SettingsService: ObservableObject {
     enum TriggerType: String, CaseIterable {
         case keyboard
         case mouseButton
+        case both
     }
 
     enum InputMode: String, CaseIterable {

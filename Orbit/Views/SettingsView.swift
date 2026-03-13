@@ -37,18 +37,21 @@ struct SettingsView: View {
 
             Section {
                 Picker("Activation Method", selection: $settings.triggerType) {
-                    Text("Keyboard Shortcut").tag(SettingsService.TriggerType.keyboard)
+                    Text("Keyboard").tag(SettingsService.TriggerType.keyboard)
                     Text("Mouse Button").tag(SettingsService.TriggerType.mouseButton)
+                    Text("Both").tag(SettingsService.TriggerType.both)
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: settings.triggerType) { settings.save() }
             }
 
-            if settings.triggerType == .keyboard {
+            if settings.triggerType == .keyboard || settings.triggerType == .both {
                 Section("Keyboard Shortcut") {
                     ShortcutRecorderView(settings: settings)
                 }
-            } else {
+            }
+
+            if settings.triggerType == .mouseButton || settings.triggerType == .both {
                 Section("Mouse Button") {
                     Picker("Button", selection: $settings.mouseButton) {
                         Text("Middle Button").tag(2)
