@@ -5,7 +5,7 @@ struct ShortcutRecorderView: View {
     @ObservedObject var settings: SettingsService
     @State private var isRecording = false
     @State private var localMonitor: Any?
-    @State private var flagsMonitor: Any?
+
 
     var body: some View {
         HStack {
@@ -42,6 +42,7 @@ struct ShortcutRecorderView: View {
                 .buttonStyle(.bordered)
             }
         }
+        .onDisappear { stopRecording() }
     }
 
     private func startRecording() {

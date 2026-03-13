@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import QuartzCore
 import SwiftUI
 
@@ -23,6 +24,10 @@ final class OrbitViewModel: ObservableObject {
     private var scrollMonitor: Any?
     private var lastScrollSelectionTime: CFTimeInterval = 0
     private let scrollSelectionMinInterval: CFTimeInterval = 0.06
+
+    deinit {
+        stopMonitors()
+    }
 
     var center: CGPoint {
         CGPoint(x: orbitSize / 2, y: orbitSize / 2)
@@ -66,7 +71,7 @@ final class OrbitViewModel: ObservableObject {
     }
 
     func angleForIndex(_ index: Int) -> Double {
-        guard apps.count > 0 else { return 0 }
+        guard !apps.isEmpty else { return 0 }
         let slice = (2 * Double.pi) / Double(apps.count)
         return slice * Double(index) - Double.pi / 2
     }
@@ -144,23 +149,23 @@ final class OrbitViewModel: ObservableObject {
         // Keyboard navigation (local): ESC, arrows, Enter
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            switch event.keyCode {
-            case 53: // ESC
+            switch Int(event.keyCode) {
+            case kVK_Escape:
                 self.dismiss()
                 return nil
-            case 123: // Left arrow
+            case kVK_LeftArrow:
                 if !self.apps.isEmpty {
                     let current = self.selectedIndex ?? 0
                     self.selectedIndex = (current - 1 + self.apps.count) % self.apps.count
                 }
                 return nil
-            case 124: // Right arrow
+            case kVK_RightArrow:
                 if !self.apps.isEmpty {
                     let current = self.selectedIndex ?? 0
                     self.selectedIndex = (current + 1) % self.apps.count
                 }
                 return nil
-            case 36: // Return/Enter
+            case kVK_Return:
                 self.selectAndSwitch()
                 return nil
             default:
@@ -168,7 +173,7 @@ final class OrbitViewModel: ObservableObject {
             }
         }
         globalEscMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 {
+            if Int(event.keyCode) == kVK_Escape {
                 self?.dismiss()
             }
         }
