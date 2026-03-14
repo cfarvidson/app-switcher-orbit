@@ -8,19 +8,18 @@ struct OrbitView: View {
             if viewModel.isVisible {
                 // Background blur circle (tap to dismiss)
                 Circle()
-                    .fill(.ultraThinMaterial)
+                    .fill(.regularMaterial)
                     .frame(width: viewModel.orbitSize - 40, height: viewModel.orbitSize - 40)
-                    .opacity(0.9)
                     .onTapGesture { viewModel.dismiss() }
 
                 // Inner ring
                 Circle()
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
                     .frame(width: viewModel.radius * 2, height: viewModel.radius * 2)
 
                 // Center dot
                 Circle()
-                    .fill(Color.white.opacity(0.4))
+                    .fill(Color.primary.opacity(0.3))
                     .frame(width: 6, height: 6)
 
                 // Selection indicator line
@@ -53,12 +52,12 @@ struct OrbitView: View {
                 if let index = viewModel.selectedIndex, index < viewModel.apps.count {
                     Text(viewModel.apps[index].name)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
                             Capsule()
-                                .fill(.ultraThinMaterial)
+                                .fill(.thickMaterial)
                         )
                         .offset(y: 20)
                 }
