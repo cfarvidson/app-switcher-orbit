@@ -8,18 +8,22 @@ struct OrbitView: View {
             if viewModel.isVisible {
                 // Background blur circle (tap to dismiss)
                 Circle()
-                    .fill(.regularMaterial)
+                    .fill(Color.black.opacity(0.15))
                     .frame(width: viewModel.orbitSize - 40, height: viewModel.orbitSize - 40)
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: viewModel.orbitSize - 40, height: viewModel.orbitSize - 40)
+                    .opacity(0.9)
                     .onTapGesture { viewModel.dismiss() }
 
                 // Inner ring
                 Circle()
-                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
                     .frame(width: viewModel.radius * 2, height: viewModel.radius * 2)
 
                 // Center dot
                 Circle()
-                    .fill(Color.primary.opacity(0.3))
+                    .fill(Color.white.opacity(0.4))
                     .frame(width: 6, height: 6)
 
                 // Selection indicator line
@@ -52,12 +56,14 @@ struct OrbitView: View {
                 if let index = viewModel.selectedIndex, index < viewModel.apps.count {
                     Text(viewModel.apps[index].name)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
                             Capsule()
-                                .fill(.thickMaterial)
+                                .fill(.ultraThinMaterial)
+                                .shadow(color: .black.opacity(0.2), radius: 4)
                         )
                         .offset(y: 20)
                 }
