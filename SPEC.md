@@ -151,6 +151,7 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 | modifiers         | `UInt32`                     | `optionKey` (2048) | `modifiers`         |
 | keyDisplayName    | `String`                     | `"Space"`          | `keyDisplayName`    |
 | mouseButton       | `Int`                        | `2` (middle)       | `mouseButton`       |
+| edgeActivation    | `Bool`                       | `false`            | `edgeActivation`    |
 | excludedBundleIds | `Set<String>`                | `[]`               | `excludedBundleIds` |
 
 All properties are `@Published`. The `save()` method writes all properties to UserDefaults.
@@ -195,6 +196,7 @@ Geometry is snapshotted once per show to avoid reading SettingsService on every 
 - Calculate mouse angle: `atan2(-dy, dx)`, normalized to [0, 2π)
 - Find the app whose angle is closest to the mouse angle (handling the 0/2π wrap)
 - Set `selectedIndex` to that app
+- If edge activation is enabled and mouse distance exceeds `radius + iconSize × 0.6`, automatically trigger `selectAndSwitch()` — no click needed
 
 ### Sticky Selection (handleHoverEnded)
 

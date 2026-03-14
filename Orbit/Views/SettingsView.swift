@@ -65,6 +65,15 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Section {
+                Toggle("Edge Activation", isOn: $settings.edgeActivation)
+                    .onChange(of: settings.edgeActivation) { settings.save() }
+
+                Text("Automatically switch to the selected app when the cursor reaches the edge of the ring. No click needed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()

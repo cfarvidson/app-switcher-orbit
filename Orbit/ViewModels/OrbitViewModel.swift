@@ -15,6 +15,8 @@ final class OrbitViewModel: ObservableObject {
     private(set) var orbitSize: CGFloat = 400
     private(set) var deadZone: CGFloat = 35
     private(set) var stickySelection: Bool = false
+    private(set) var edgeActivation: Bool = false
+    private(set) var edgeActivationRadius: CGFloat = 0
 
     private var escMonitor: Any?
     private var globalEscMonitor: Any?
@@ -40,6 +42,8 @@ final class OrbitViewModel: ObservableObject {
         orbitSize = isTrackpad ? 500 : 400
         deadZone = isTrackpad ? 45 : 35
         stickySelection = isTrackpad
+        edgeActivation = SettingsService.shared.edgeActivation
+        edgeActivationRadius = radius + iconSize * 0.6
         scrollAccumulator = 0
         lastScrollSelectionTime = 0
 
@@ -112,6 +116,10 @@ final class OrbitViewModel: ObservableObject {
         }
 
         selectedIndex = closestIndex
+
+        if edgeActivation && distance > Double(edgeActivationRadius) {
+            selectAndSwitch()
+        }
     }
 
     func handleHoverEnded() {

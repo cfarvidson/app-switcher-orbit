@@ -22,6 +22,7 @@ final class SettingsService: ObservableObject {
     @Published var modifiers: UInt32
     @Published var keyDisplayName: String
     @Published var mouseButton: Int
+    @Published var edgeActivation: Bool
     @Published var excludedBundleIds: Set<String>
 
     private let defaults = UserDefaults.standard
@@ -41,6 +42,9 @@ final class SettingsService: ObservableObject {
         mouseButton = defaults.object(forKey: "mouseButton") != nil
             ? defaults.integer(forKey: "mouseButton")
             : 2
+        edgeActivation = defaults.object(forKey: "edgeActivation") != nil
+            ? defaults.bool(forKey: "edgeActivation")
+            : false
         excludedBundleIds = Set(defaults.stringArray(forKey: "excludedBundleIds") ?? [])
     }
 
@@ -51,6 +55,7 @@ final class SettingsService: ObservableObject {
         defaults.set(Int(modifiers), forKey: "modifiers")
         defaults.set(keyDisplayName, forKey: "keyDisplayName")
         defaults.set(mouseButton, forKey: "mouseButton")
+        defaults.set(edgeActivation, forKey: "edgeActivation")
         defaults.set(Array(excludedBundleIds), forKey: "excludedBundleIds")
     }
 
