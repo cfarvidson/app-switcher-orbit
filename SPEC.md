@@ -79,10 +79,11 @@ Equality is based on `id` (process ID) only.
 
 A stateless enum with one static method:
 
-- `runningApps(excluding: Set<String>) -> [RunningApp]`
+- `runningApps(excluding: Set<String>, pinnedFirst: [String]) -> [RunningApp]`
 - Queries `NSWorkspace.shared.runningApplications`
 - Filters to `activationPolicy == .regular` (GUI apps only)
 - Excludes apps whose bundle ID is in the exclusion set
+- Pinned apps (by bundle ID) are sorted to the front in their pinned order; remaining apps follow
 - Falls back to a blank 64x64 NSImage if `app.icon` is nil
 
 ## HotkeyService
@@ -152,6 +153,7 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 | keyDisplayName    | `String`                     | `"Space"`          | `keyDisplayName`    |
 | mouseButton       | `Int`                        | `2` (middle)       | `mouseButton`       |
 | edgeActivation    | `Bool`                       | `false`            | `edgeActivation`    |
+| pinnedBundleIds   | `[String]`                   | `[]`               | `pinnedBundleIds`   |
 | excludedBundleIds | `Set<String>`                | `[]`               | `excludedBundleIds` |
 
 All properties are `@Published`. The `save()` method writes all properties to UserDefaults.
@@ -268,7 +270,7 @@ Displays a single app icon:
 
 ## SettingsView
 
-A `TabView` with two tabs:
+A `TabView` with three tabs:
 
 ### Shortcut Tab
 
@@ -276,7 +278,15 @@ A `TabView` with two tabs:
 - **Activation Method** segmented picker: Keyboard / Mouse Button / Both
 - If keyboard or both: shows `ShortcutRecorderView`
 - If mouse button or both: shows a picker with Middle Button, Button 4 (Back), Button 5 (Forward)
+- **Edge Activation** toggle (auto-switch when cursor reaches ring edge)
 - Uses `.formStyle(.grouped)`
+
+### Pinned Tab
+
+- Pinned apps are shown at the top in their pinned order, with a drag-to-reorder handle and an unpin button
+- Below, a list of running apps not yet pinned, each with a pin button
+- Pinned apps always appear first in the orbit ring at fixed positions for muscle memory
+- Refresh button updates the running apps list
 
 ### Apps Tab
 

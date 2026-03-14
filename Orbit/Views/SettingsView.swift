@@ -9,6 +9,8 @@ struct SettingsView: View {
         TabView {
             shortcutTab
                 .tabItem { Label("Shortcut", systemImage: "keyboard") }
+            pinnedTab
+                .tabItem { Label("Pinned", systemImage: "pin") }
             appsTab
                 .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
         }
@@ -79,6 +81,98 @@ struct SettingsView: View {
         .padding()
     }
 
+    // MARK: - Pinned Tab
+
+    private var pinnedTab: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pinned apps always appear first in the ring, in this order.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+            // Pinned apps (reorderable)
+            if !settings.pinnedBundleIds.isEmpty {
+                List {
+                    ForEach(pinnedAppInfos, id: \.bundleId) { app in
+                        HStack(spacing: 10) {
+                            Image(nsImage: app.icon)
+                                .resizable()
+                                .frame(width: 28, height: 28)
+
+                            Text(app.name)
+                                .lineLimit(1)
+
+                            Spacer()
+
+                            Button {
+                                settings.pinnedBundleIds.removeAll { $0 == app.bundleId }
+                                settings.save()
+                            } label: {
+                                Image(systemName: "pin.slash")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .onMove { from, to in
+                        settings.pinnedBundleIds.move(fromOffsets: from, toOffset: to)
+                        settings.save()
+                    }
+                }
+            } else {
+                Spacer()
+                Text("No pinned apps yet.\nPin apps from the list below.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                Spacer()
+            }
+
+            Divider()
+
+            // Available apps to pin
+            Text("Running Apps")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+
+            List(unpinnedApps) { app in
+                HStack(spacing: 10) {
+                    Image(nsImage: app.icon)
+                        .resizable()
+                        .frame(width: 28, height: 28)
+
+                    Text(app.name)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Button {
+                        settings.pinnedBundleIds.append(app.bundleId)
+                        settings.save()
+                    } label: {
+                        Image(systemName: "pin")
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding(.vertical, 2)
+            }
+
+            HStack {
+                Button("Refresh") { refreshApps() }
+                    .buttonStyle(.borderless)
+                Spacer()
+                Text("\(settings.pinnedBundleIds.count) pinned")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+        }
+    }
+
     // MARK: - Apps Tab
 
     private var appsTab: some View {
@@ -131,6 +225,17 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    private var pinnedAppInfos: [AppInfo] {
+        settings.pinnedBundleIds.compactMap { bundleId in
+            allApps.first { $0.bundleId == bundleId }
+        }
+    }
+
+    private var unpinnedApps: [AppInfo] {
+        let pinned = Set(settings.pinnedBundleIds)
+        return allApps.filter { !pinned.contains($0.bundleId) }
+    }
 
     private func refreshApps() {
         allApps = NSWorkspace.shared.runningApplications

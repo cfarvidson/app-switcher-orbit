@@ -23,6 +23,7 @@ final class SettingsService: ObservableObject {
     @Published var keyDisplayName: String
     @Published var mouseButton: Int
     @Published var edgeActivation: Bool
+    @Published var pinnedBundleIds: [String]
     @Published var excludedBundleIds: Set<String>
 
     private let defaults = UserDefaults.standard
@@ -45,6 +46,7 @@ final class SettingsService: ObservableObject {
         edgeActivation = defaults.object(forKey: "edgeActivation") != nil
             ? defaults.bool(forKey: "edgeActivation")
             : false
+        pinnedBundleIds = defaults.stringArray(forKey: "pinnedBundleIds") ?? []
         excludedBundleIds = Set(defaults.stringArray(forKey: "excludedBundleIds") ?? [])
     }
 
@@ -56,6 +58,7 @@ final class SettingsService: ObservableObject {
         defaults.set(keyDisplayName, forKey: "keyDisplayName")
         defaults.set(mouseButton, forKey: "mouseButton")
         defaults.set(edgeActivation, forKey: "edgeActivation")
+        defaults.set(pinnedBundleIds, forKey: "pinnedBundleIds")
         defaults.set(Array(excludedBundleIds), forKey: "excludedBundleIds")
     }
 

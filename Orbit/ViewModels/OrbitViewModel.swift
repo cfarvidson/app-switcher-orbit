@@ -48,7 +48,8 @@ final class OrbitViewModel: ObservableObject {
         lastScrollSelectionTime = 0
 
         let excluded = SettingsService.shared.excludedBundleIds
-        apps = AppService.runningApps(excluding: excluded)
+        let pinned = SettingsService.shared.pinnedBundleIds
+        apps = AppService.runningApps(excluding: excluded, pinnedFirst: pinned)
         selectedIndex = nil
         isVisible = true
         startMonitors()
