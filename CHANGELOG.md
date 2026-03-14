@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.3
+
+### New Features
+
+- **Pinned apps** — Pin your most-used apps to fixed positions in the ring for muscle memory. Pinned apps always appear first, in your chosen order. Drag to reorder in the new "Pinned" tab in Settings.
+
+### Improvements
+
+- Improved overlay readability on light backgrounds (subtle dark underlay + text shadow)
+
 ## 1.0.2
 
 ### New Features
