@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.4
+
+### Bug Fixes
+
+- **Edge activation** — Fixed accidental activation when the cursor starts near the ring edge on open. The mouse must now enter the ring before outward movement can trigger a switch.
+
 ## 1.0.3
 
 ### New Features
