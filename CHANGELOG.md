@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.2
+
+### New Features
+
+- **Edge activation** — Move the cursor to the edge of the ring to automatically switch to the selected app. No click needed. Toggled off by default in Settings.
+
+### Improvements
+
+- Author info and website link in the About panel
+
 ## 1.0.1
 
 ### New Features
