@@ -17,6 +17,7 @@ final class OrbitViewModel: ObservableObject {
     private(set) var stickySelection: Bool = false
     private(set) var edgeActivation: Bool = false
     private(set) var edgeActivationRadius: CGFloat = 0
+    private var mouseEnteredRing: Bool = false
 
     private var escMonitor: Any?
     private var globalEscMonitor: Any?
@@ -44,6 +45,7 @@ final class OrbitViewModel: ObservableObject {
         stickySelection = isTrackpad
         edgeActivation = SettingsService.shared.edgeActivation
         edgeActivationRadius = radius + iconSize * 0.6
+        mouseEnteredRing = false
         scrollAccumulator = 0
         lastScrollSelectionTime = 0
 
@@ -118,7 +120,11 @@ final class OrbitViewModel: ObservableObject {
 
         selectedIndex = closestIndex
 
-        if edgeActivation && distance > Double(edgeActivationRadius) {
+        if distance < Double(edgeActivationRadius) {
+            mouseEnteredRing = true
+        }
+
+        if edgeActivation && mouseEnteredRing && distance > Double(edgeActivationRadius) {
             selectAndSwitch()
         }
     }
