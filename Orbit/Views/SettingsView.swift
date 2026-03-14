@@ -12,7 +12,7 @@ struct SettingsView: View {
             appsTab
                 .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
         }
-        .frame(width: 420, height: 520)
+        .frame(width: 420, height: 600)
         .onAppear { refreshApps() }
     }
 
