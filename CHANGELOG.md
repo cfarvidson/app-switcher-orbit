@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.7
+
+### New Features
+
+- **Check for Updates** — New menu item lets you manually check for newer releases at any time. Shows an alert if you're already up to date.
+
 ## 1.0.6
 
 ### Improvements
