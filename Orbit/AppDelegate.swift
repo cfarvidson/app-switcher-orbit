@@ -63,6 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         menu.addItem(NSMenuItem.separator())
         menu.addItem(
+            NSMenuItem(title: "Check for Updates\u{2026}", action: #selector(checkForUpdateManual), keyEquivalent: "")
+        )
+        menu.addItem(
             NSMenuItem(title: "About Orbit", action: #selector(showAbout), keyEquivalent: "")
         )
         menu.addItem(NSMenuItem.separator())
@@ -144,16 +147,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Update check
 
-    private func checkForUpdate() {
+    private func checkForUpdate(silent: Bool = true) {
         UpdateService.checkForUpdate { [weak self] release in
-            guard let release else { return }
             DispatchQueue.main.async {
-                self?.showUpdateMenuItem(release)
+                if let release {
+                    self?.showUpdateMenuItem(release)
+                } else if !silent {
+                    self?.showUpToDateAlert()
+                }
             }
         }
     }
 
+    @objc private func checkForUpdateManual() {
+        checkForUpdate(silent: false)
+    }
+
     private func showUpdateMenuItem(_ release: UpdateService.Release) {
+        // Remove existing update item if present
+        if let existing = updateMenuItem {
+            if let index = statusItem.menu?.index(of: existing), index >= 0 {
+                statusItem.menu?.removeItem(at: index + 1) // separator
+                statusItem.menu?.removeItem(existing)
+            }
+        }
+
         let item = NSMenuItem(
             title: "Update Available (v\(release.version))",
             action: #selector(openUpdate(_:)),
@@ -164,6 +182,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu?.insertItem(item, at: 0)
         statusItem.menu?.insertItem(NSMenuItem.separator(), at: 1)
         updateMenuItem = item
+    }
+
+    private func showUpToDateAlert() {
+        let alert = NSAlert()
+        alert.messageText = "You're up to date!"
+        alert.informativeText = "Orbit v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") is the latest version."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func openUpdate(_ sender: NSMenuItem) {

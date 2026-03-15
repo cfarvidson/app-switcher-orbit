@@ -156,9 +156,10 @@ A stateless enum that checks for newer releases on GitHub.
 
 ### Integration (AppDelegate)
 
-- Called once from `applicationDidFinishLaunching`
+- Called silently from `applicationDidFinishLaunching` (no feedback if up to date)
+- "Check for Updates..." menu item triggers a manual check — shows an alert if already up to date
 - If a newer release is found, inserts an "Update Available (vX.Y.Z)" menu item at the top of the status menu
-- Clicking the item opens the GitHub release page in the default browser
+- Clicking the update item opens the GitHub release page in the default browser
 
 ## SettingsService
 
