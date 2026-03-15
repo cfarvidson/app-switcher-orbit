@@ -75,8 +75,16 @@ The built app is in `~/Library/Developer/Xcode/DerivedData/Orbit-*/Build/Product
 | Settings          | `SettingsService.swift`      | UserDefaults persistence for shortcuts and exclusions       |
 | Settings UI       | `SettingsView.swift`         | Tab view for shortcut config and app filtering              |
 | Shortcut recorder | `ShortcutRecorderView.swift` | Captures keyboard shortcut via NSEvent monitor              |
+| Update checker    | `UpdateService.swift`        | Checks GitHub Releases for newer versions                   |
 | Model             | `RunningApp.swift`           | Wraps NSRunningApplication                                  |
+
+## Author
+
+**Carl-Fredrik Arvidson**
+
+- [carl-fredrik.arvidson.io](https://carl-fredrik.arvidson.io)
+- [github.com/cfarvidson/app-switcher-orbit](https://github.com/cfarvidson/app-switcher-orbit)
 
 ## License
 
-MIT
+[GPL-3.0](LICENSE)

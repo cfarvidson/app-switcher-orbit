@@ -202,10 +202,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium)]
         ))
         credits.append(NSAttributedString(
-            string: "carl-fredrik.arvidson.io",
+            string: "carl-fredrik.arvidson.io\n",
             attributes: [
                 .font: NSFont.systemFont(ofSize: 11),
                 .link: URL(string: "https://carl-fredrik.arvidson.io")!,
+            ]
+        ))
+        credits.append(NSAttributedString(
+            string: "github.com/cfarvidson/app-switcher-orbit",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .link: URL(string: "https://github.com/cfarvidson/app-switcher-orbit")!,
             ]
         ))
         NSApp.orderFrontStandardAboutPanel(options: [
