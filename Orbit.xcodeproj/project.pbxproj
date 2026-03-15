@@ -13,6 +13,7 @@
 		34C80F3712FAF719C2C3D455 /* OverlayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */; };
 		4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE9434D67F596027017522B /* AppService.swift */; };
 		76061C98C618303FC707F143 /* RunningApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3785CD7C0BD802AE20E35888 /* RunningApp.swift */; };
+		A40A689239DCEC22AEC0A8DE /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FBFD987247464C359E6CBEC /* UpdateService.swift */; };
 		A5911D106F4DE7F9469D7464 /* OrbitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B0E64515D2F209A1ACF98A /* OrbitView.swift */; };
 		A75E73FD358C8583C278D71F /* ShortcutRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */; };
 		B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */; };
@@ -30,6 +31,7 @@
 		4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		6D328D7D403F95D8A287EA8E /* OrbitViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitViewModel.swift; sourceTree = "<group>"; };
 		93E43D9E19F5EF7D480B0771 /* Orbit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orbit.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9FBFD987247464C359E6CBEC /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
 		9FEF45BFFE010BCA9A5D3000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
 		BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayPanel.swift; sourceTree = "<group>"; };
@@ -114,6 +116,7 @@
 				FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */,
 				BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */,
 				A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */,
+				9FBFD987247464C359E6CBEC /* UpdateService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -197,6 +200,7 @@
 				F204E258AC938FD314360C36 /* SettingsService.swift in Sources */,
 				B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */,
 				A75E73FD358C8583C278D71F /* ShortcutRecorderView.swift in Sources */,
+				A40A689239DCEC22AEC0A8DE /* UpdateService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -217,7 +221,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.4;
+				MARKETING_VERSION = 1.0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.orbit.appswitcher;
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -295,7 +299,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.4;
+				MARKETING_VERSION = 1.0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.orbit.appswitcher;
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";

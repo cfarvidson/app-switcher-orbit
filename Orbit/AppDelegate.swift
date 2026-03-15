@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var activationMenuItem: NSMenuItem?
     private var inputModeMenuItem: NSMenuItem?
+    private var updateMenuItem: NSMenuItem?
     private var lastToggleTime: Date = .distantPast
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -24,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.onDismiss = { [weak self] in
             self?.overlayPanel?.hideOverlay()
         }
+
+        checkForUpdate()
     }
 
     // MARK: - Setup
@@ -137,6 +140,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             viewModel.show()
             overlayPanel?.showOverlay(at: mouseLocation, size: viewModel.orbitSize)
         }
+    }
+
+    // MARK: - Update check
+
+    private func checkForUpdate() {
+        UpdateService.checkForUpdate { [weak self] release in
+            guard let release else { return }
+            DispatchQueue.main.async {
+                self?.showUpdateMenuItem(release)
+            }
+        }
+    }
+
+    private func showUpdateMenuItem(_ release: UpdateService.Release) {
+        let item = NSMenuItem(
+            title: "Update Available (v\(release.version))",
+            action: #selector(openUpdate(_:)),
+            keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = release.url
+        statusItem.menu?.insertItem(item, at: 0)
+        statusItem.menu?.insertItem(NSMenuItem.separator(), at: 1)
+        updateMenuItem = item
+    }
+
+    @objc private func openUpdate(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: - Settings window

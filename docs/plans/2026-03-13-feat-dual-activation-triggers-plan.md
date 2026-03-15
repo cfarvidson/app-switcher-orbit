@@ -128,13 +128,13 @@ Document the new `.both` trigger type.
 
 ## Files to Modify
 
-| File | Changes |
-|------|---------|
-| `Orbit/Services/SettingsService.swift` | Add `case both` to `TriggerType` |
-| `Orbit/Services/HotkeyService.swift` | Add `registerMouseButtonOnly()`, update `registerFromSettings()` |
-| `Orbit/Views/SettingsView.swift` | Three-option picker, show both sections when `.both` |
-| `Orbit/AppDelegate.swift` | Update `activationDisplayString()` for `.both` |
-| `SPEC.md` | Document new trigger type |
+| File                                   | Changes                                                          |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| `Orbit/Services/SettingsService.swift` | Add `case both` to `TriggerType`                                 |
+| `Orbit/Services/HotkeyService.swift`   | Add `registerMouseButtonOnly()`, update `registerFromSettings()` |
+| `Orbit/Views/SettingsView.swift`       | Three-option picker, show both sections when `.both`             |
+| `Orbit/AppDelegate.swift`              | Update `activationDisplayString()` for `.both`                   |
+| `SPEC.md`                              | Document new trigger type                                        |
 
 ## Dependencies & Risks
 

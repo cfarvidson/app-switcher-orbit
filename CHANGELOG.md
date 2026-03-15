@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5
+
+### New Features
+
+- **Update checker** — Orbit now checks for new releases on GitHub at launch. When a newer version is available, an "Update Available" item appears at the top of the menu bar menu, linking directly to the download page.
+
 ## 1.0.4
 
 ### Bug Fixes

@@ -295,13 +295,13 @@ Per CLAUDE.md convention, update SPEC.md to document all changes.
 
 ## Files to Modify
 
-| File | Changes |
-|------|---------|
-| `Orbit/Services/SettingsService.swift` | Add `InputMode` enum, `@Published var inputMode`, init/save |
+| File                                    | Changes                                                                                                                                                  |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Orbit/Services/SettingsService.swift`  | Add `InputMode` enum, `@Published var inputMode`, init/save                                                                                              |
 | `Orbit/ViewModels/OrbitViewModel.swift` | Snapshot geometry in show(), scroll handler with momentum filtering, arrow keys in existing keyDown monitor, handleHoverEnded(), scrollAccumulator reset |
-| `Orbit/Views/OrbitView.swift` | Delegate hover-ended to viewModel, interruptible spring animation |
-| `Orbit/Views/SettingsView.swift` | Input Mode segmented picker section with description |
-| `SPEC.md` | Document new setting, universal scroll/arrow navigation, geometry modes |
+| `Orbit/Views/OrbitView.swift`           | Delegate hover-ended to viewModel, interruptible spring animation                                                                                        |
+| `Orbit/Views/SettingsView.swift`        | Input Mode segmented picker section with description                                                                                                     |
+| `SPEC.md`                               | Document new setting, universal scroll/arrow navigation, geometry modes                                                                                  |
 
 ## Dependencies & Risks
 

@@ -30,7 +30,8 @@ Orbit/
 │   ├── AppService.swift        # Fetches running GUI apps
 │   ├── HotkeyService.swift     # Carbon global hotkey + mouse button monitors
 │   ├── OverlayPanel.swift      # Floating transparent NSPanel
-│   └── SettingsService.swift   # UserDefaults persistence (singleton)
+│   ├── SettingsService.swift   # UserDefaults persistence (singleton)
+│   └── UpdateService.swift     # GitHub release update checker
 ├── ViewModels/
 │   └── OrbitViewModel.swift    # Selection logic, angle math, event monitors
 ├── Views/
@@ -55,11 +56,14 @@ Responsibilities:
 1. **Accessibility prompt** — on launch, call `AXIsProcessTrustedWithOptions` with the prompt option to request Accessibility permissions
 2. **Menu bar status item** — `NSStatusBar.system.statusItem` with the SF Symbol `circle.dotted`
    - Menu items: Settings (Cmd+,), About Orbit, Quit Orbit (Cmd+Q)
+   - Disabled info items show current activation method and input mode
+   - "Update Available" item inserted at top when a newer GitHub release is found
 3. **Hotkey setup** — create `HotkeyService` with a callback that calls `toggleOrbit()`
 4. **Overlay panel** — create a single `OverlayPanel` hosting the `OrbitView`
 5. **Settings observation** — use Combine to observe changes to trigger settings (debounced 100ms) and re-register the hotkey
-6. **Settings window** — opened as a plain `NSWindow` (420x380) with `NSHostingView<SettingsView>`, not SwiftUI's Settings scene
+6. **Settings window** — opened as a plain `NSWindow` (420x600) with `NSHostingView<SettingsView>`, not SwiftUI's Settings scene
 7. **Toggle logic** — if visible, dismiss; if hidden, get `NSEvent.mouseLocation`, call `viewModel.show()`, then `overlayPanel.showOverlay(at:size:)`
+8. **Update check** — on launch, calls `UpdateService.checkForUpdate` to check for newer GitHub releases
 
 ## RunningApp Model
 
@@ -138,23 +142,41 @@ Subclass of `NSPanel`:
 
 - `orderOut(nil)`
 
+## UpdateService
+
+A stateless enum that checks for newer releases on GitHub.
+
+### checkForUpdate(completion:)
+
+- Sends a GET request to `https://api.github.com/repos/cfarvidson/app-switcher-orbit/releases/latest`
+- Parses `tag_name` (stripping leading `v`) and `html_url` from the JSON response
+- Compares the remote version to `CFBundleShortVersionString` using semantic version comparison (major.minor.patch)
+- If a newer version exists, returns a `Release` struct with the version string and release URL
+- Timeout: 10 seconds; silently returns `nil` on any error
+
+### Integration (AppDelegate)
+
+- Called once from `applicationDidFinishLaunching`
+- If a newer release is found, inserts an "Update Available (vX.Y.Z)" menu item at the top of the status menu
+- Clicking the item opens the GitHub release page in the default browser
+
 ## SettingsService
 
 Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 
 ### Stored Properties
 
-| Property          | Type                         | Default            | UserDefaults Key    |
-| ----------------- | ---------------------------- | ------------------ | ------------------- |
-| triggerType       | `.keyboard` / `.mouseButton` / `.both` | `.keyboard` | `triggerType`       |
-| inputMode         | `.mouse` / `.trackpad`       | `.mouse`           | `inputMode`         |
-| keyCode           | `UInt32`                     | `kVK_Space` (49)   | `keyCode`           |
-| modifiers         | `UInt32`                     | `optionKey` (2048) | `modifiers`         |
-| keyDisplayName    | `String`                     | `"Space"`          | `keyDisplayName`    |
-| mouseButton       | `Int`                        | `2` (middle)       | `mouseButton`       |
-| edgeActivation    | `Bool`                       | `false`            | `edgeActivation`    |
-| pinnedBundleIds   | `[String]`                   | `[]`               | `pinnedBundleIds`   |
-| excludedBundleIds | `Set<String>`                | `[]`               | `excludedBundleIds` |
+| Property          | Type                                   | Default            | UserDefaults Key    |
+| ----------------- | -------------------------------------- | ------------------ | ------------------- |
+| triggerType       | `.keyboard` / `.mouseButton` / `.both` | `.keyboard`        | `triggerType`       |
+| inputMode         | `.mouse` / `.trackpad`                 | `.mouse`           | `inputMode`         |
+| keyCode           | `UInt32`                               | `kVK_Space` (49)   | `keyCode`           |
+| modifiers         | `UInt32`                               | `optionKey` (2048) | `modifiers`         |
+| keyDisplayName    | `String`                               | `"Space"`          | `keyDisplayName`    |
+| mouseButton       | `Int`                                  | `2` (middle)       | `mouseButton`       |
+| edgeActivation    | `Bool`                                 | `false`            | `edgeActivation`    |
+| pinnedBundleIds   | `[String]`                             | `[]`               | `pinnedBundleIds`   |
+| excludedBundleIds | `Set<String>`                          | `[]`               | `excludedBundleIds` |
 
 All properties are `@Published`. The `save()` method writes all properties to UserDefaults.
 
