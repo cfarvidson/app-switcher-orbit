@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.6
+
+### Improvements
+
+- Added author info and GitHub repo link to the About panel
+- Updated README with author section and architecture details
+- License changed to GPL-3.0
+
 ## 1.0.5
 
 ### New Features
