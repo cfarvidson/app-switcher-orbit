@@ -9,6 +9,10 @@ A macOS radial app switcher inspired by Hitman's weapon wheel. Press a shortcut 
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
 
+<p align="center">
+  <img src="screenshot.png" width="600" alt="Orbit in action">
+</p>
+
 ## How It Works
 
 1. Press **Option+Space** (default) — a radial HUD appears at your mouse position
