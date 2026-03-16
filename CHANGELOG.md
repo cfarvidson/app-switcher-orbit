@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8
+
+### Improvements
+
+- Added screenshot to README
+
 ## 1.0.7
 
 ### New Features
