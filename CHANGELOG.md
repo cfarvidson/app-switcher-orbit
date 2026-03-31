@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.9
+
+### Improvements
+
+- **Smart mouse trigger suppression** — When using a mouse button as the trigger, Orbit now detects if the cursor is over a browser tab or link and suppresses activation. This prevents conflicts with middle-click-to-close-tab and middle-click-to-open-in-new-tab actions in Safari, Chrome, and Firefox/Zen browsers.
+
 ## 1.0.8
 
 ### Improvements
