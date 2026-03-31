@@ -108,6 +108,7 @@ Supports three trigger modes:
 - Global catches clicks when other apps are focused; local catches clicks when the overlay panel is key
 - Matches on `event.buttonNumber` — middle button = 2, button 4 = 3, button 5 = 4
 - For middle button, monitors `.otherMouseDown`; right mouse would use `.rightMouseDown`
+- **Smart suppression**: the global monitor uses the macOS Accessibility API (`AXUIElementCopyElementAtPosition`) to check what's under the cursor before triggering. The trigger is suppressed when the cursor is over: (1) **window chrome** — the element is `AXWindow` itself with no child, covering tab bars and toolbars in Firefox/Zen-based browsers; (2) a **link** — `AXLink` role found in the parent chain (up to 5 levels), preventing middle-click-open-in-new-tab conflicts; (3) a **tab group** — `AXTabGroup` role in the parent chain, covering Chrome/Safari tab bars. The local monitor (when Orbit's overlay is key) always fires immediately without the AX check.
 
 ### Both Mode
 

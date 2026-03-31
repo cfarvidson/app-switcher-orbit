@@ -87,6 +87,7 @@ final class HotkeyService {
         // Global monitor: fires when other apps are focused
         mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { [weak self] event in
             if event.buttonNumber == button {
+                guard self?.isCursorOverTabOrLink() != true else { return }
                 DispatchQueue.main.async {
                     self?.callback()
                 }
@@ -105,6 +106,76 @@ final class HotkeyService {
         }
 
         return mouseMonitor != nil
+    }
+
+    // MARK: - Accessibility element detection
+
+    /// Returns true if the cursor is over a tab bar element or a link,
+    /// where middle-click typically has its own meaning (close tab, open in new tab).
+    /// Uses the macOS Accessibility API to inspect what's under the cursor.
+    /// Note: Electron apps expose generic AXGroup elements, so detection is limited there.
+    private func isCursorOverTabOrLink() -> Bool {
+        let mouseLocation = NSEvent.mouseLocation
+        guard let primaryScreen = NSScreen.screens.first else { return false }
+
+        // Convert from AppKit coordinates (bottom-left origin) to AX coordinates (top-left origin)
+        let axX = Float(mouseLocation.x)
+        let axY = Float(primaryScreen.frame.height - mouseLocation.y)
+
+        let systemWide = AXUIElementCreateSystemWide()
+        var elementRef: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(systemWide, axX, axY, &elementRef) == .success,
+              let element = elementRef else {
+            return false
+        }
+
+        // Suppress if cursor is on window chrome (title bar, tab bar, toolbar).
+        // Firefox/Zen tabs report AXWindow directly with no child element.
+        if axRole(of: element) == "AXWindow" {
+            return true
+        }
+
+        // Walk up the parent chain to catch links, tab groups, and tab buttons
+        var current: AXUIElement? = element
+        for _ in 0..<6 {
+            guard let el = current else { break }
+            let elRole = axRole(of: el)
+
+            // AXLink: middle-click opens in new tab
+            // AXTabGroup: middle-click closes tabs (Chrome tab bars)
+            // AXToolbar: covers Safari's tab bar and toolbar area
+            if elRole == "AXLink" || elRole == "AXTabGroup" || elRole == "AXToolbar" {
+                return true
+            }
+            // Safari tabs: AXRadioButton with subrole AXTabButton
+            if axSubrole(of: el) == "AXTabButton" {
+                return true
+            }
+
+            var parentRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(el, "AXParent" as CFString, &parentRef) == .success else {
+                break
+            }
+            current = (parentRef as! AXUIElement)
+        }
+
+        return false
+    }
+
+    private func axRole(of element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, "AXRole" as CFString, &value) == .success else {
+            return nil
+        }
+        return value as? String
+    }
+
+    private func axSubrole(of element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, "AXSubrole" as CFString, &value) == .success else {
+            return nil
+        }
+        return value as? String
     }
 
     // MARK: - Registration from settings
