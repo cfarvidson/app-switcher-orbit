@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.10
+
+### Bug Fixes
+
+- **Fixed mouse trigger in Zen browser** — Removed overly aggressive `AXWindow` suppression that blocked the mouse trigger across the entire content area of Firefox/Zen-based browsers. Tab/link suppression still works in Safari and Chrome.
+
 ## 1.0.9
 
 ### Improvements

@@ -129,12 +129,6 @@ final class HotkeyService {
             return false
         }
 
-        // Suppress if cursor is on window chrome (title bar, tab bar, toolbar).
-        // Firefox/Zen tabs report AXWindow directly with no child element.
-        if axRole(of: element) == "AXWindow" {
-            return true
-        }
-
         // Walk up the parent chain to catch links, tab groups, and tab buttons
         var current: AXUIElement? = element
         for _ in 0..<6 {
