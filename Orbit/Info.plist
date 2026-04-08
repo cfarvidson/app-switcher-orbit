@@ -24,6 +24,8 @@
 	<true/>
 	<key>NSAccessibilityUsageDescription</key>
 	<string>Orbit needs accessibility access to monitor global keyboard shortcuts and switch between applications.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Orbit captures microphone audio for on-device speech recognition when you select a language tile in the ring. Audio never leaves your Mac.</string>
 	<key>NSMainNibFile</key>
 	<string></string>
 	<key>NSPrincipalClass</key>

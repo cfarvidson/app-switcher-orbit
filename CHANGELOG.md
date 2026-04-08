@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.13
+
+### Improvements
+
+- **Dictation never pollutes clipboard history** — Both the transcript paste and the restore are marked with the [nspasteboard.org](http://nspasteboard.org/) transient/concealed/auto-generated types, so clipboard history managers (Maccy, Paste, Pastebot, Raycast clipboard, Alfred Snippets, …) skip the entries entirely. Your history shows exactly what it would have without Orbit running.
+
+## 1.0.12
+
+### New Features
+
+- **On-device dictation via Whisper** — The dictation tiles no longer drive macOS's built-in DictationIM. Orbit now runs OpenAI Whisper locally via [WhisperKit](https://github.com/argmaxinc/WhisperKit) (CoreML on Apple Silicon) entirely in-process, with proper punctuation, casing, and sentence boundaries across all 99 Whisper languages. Audio never leaves your Mac.
+- **Speech model picker** — Settings → Dictation now lets you choose from Tiny / Base / Small (recommended) / Medium / Large v3 Turbo / Large v3. Models download from Hugging Face with progress; the previously selected model is pre-loaded into RAM at launch so the first language-tile click is instant.
+- **Floating recording indicator** — A small non-activating panel near the cursor shows "Listening…" while a session is active. Click it to commit and stop. Loading state covers first-time model loads.
+- **Ring layout positioning** — Pinned apps and language tiles get fixed angles around the ring (Hitman weapon-wheel style) so they keep the same position regardless of which other apps are running. Layout preview tab in Settings.
+
+### Improvements
+
+- **Press hotkey to commit dictation** — Stop the session by re-pressing your Orbit hotkey or clicking the indicator and the buffered audio is transcribed and pasted as a final utterance, so you don't have to sit through the VAD silence timer. ESC still cancels (matches macOS Dictation convention).
+- **Universal text injection** — Dictation pastes via `NSPasteboard` + synthesized `Cmd+V` instead of `CGEvent.keyboardSetUnicodeString`. Works in Electron/Chromium apps (Cursor, VS Code, Slack, Discord, Notion) where unicode-only event injection was silently dropped. The pre-injection clipboard contents are restored after 300 ms.
+- **Stale Accessibility entry detection** — On launch, Orbit now checks `AXIsProcessTrusted()` independently of the system prompt. After every rebuild, ad-hoc-signed apps lose their TCC code-requirement match — the entry stays visible in System Settings → Privacy & Security → Accessibility but is silently denied, which broke synthesized keyboard events. Orbit now detects this and shows a warning alert with a button to open the right settings pane so you can toggle the entry off and back on.
+- **Accurate permission strings** — `NSMicrophoneUsageDescription` now correctly describes on-device speech recognition. The unused `NSSpeechRecognitionUsageDescription` is gone (Orbit doesn't use `SFSpeechRecognizer`).
+
+### Bug Fixes
+
+- **Removed obsolete dictation invocation paths** — The previous menu-walking AX path and the earlier `CGPostKeyboardEvent` synthesis are both gone. Both were fragile (DictationIM died ~1.4 s after start with `(null)` errors) and only worked for some apps.
+
 ## 1.0.11
 
 ### New Features

@@ -40,16 +40,26 @@ struct OrbitView: View {
                 }
 
                 // Items (apps + dictation languages) arranged in circle
-                ForEach(Array(viewModel.items.enumerated()), id: \.element.id) { index, item in
+                ForEach(Array(viewModel.positionedItems.enumerated()), id: \.element.item.id) { index, positioned in
                     let position = viewModel.positionForIndex(index)
                     let isSelected = viewModel.selectedIndex == index
 
                     Group {
-                        switch item {
+                        switch positioned.item {
                         case .app(let app):
-                            AppIconView(app: app, isSelected: isSelected, size: viewModel.iconSize)
+                            AppIconView(
+                                app: app,
+                                isSelected: isSelected,
+                                size: viewModel.iconSize,
+                                isAnchored: positioned.isAnchored
+                            )
                         case .language(let language):
-                            LanguageTileView(language: language, isSelected: isSelected, size: viewModel.iconSize)
+                            LanguageTileView(
+                                language: language,
+                                isSelected: isSelected,
+                                size: viewModel.iconSize,
+                                isAnchored: positioned.isAnchored
+                            )
                         }
                     }
                     .position(position)
