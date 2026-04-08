@@ -39,22 +39,29 @@ struct OrbitView: View {
                     )
                 }
 
-                // App icons arranged in circle
-                ForEach(Array(viewModel.apps.enumerated()), id: \.element.id) { index, app in
+                // Items (apps + dictation languages) arranged in circle
+                ForEach(Array(viewModel.items.enumerated()), id: \.element.id) { index, item in
                     let position = viewModel.positionForIndex(index)
                     let isSelected = viewModel.selectedIndex == index
 
-                    AppIconView(app: app, isSelected: isSelected, size: viewModel.iconSize)
-                        .position(position)
-                        .onTapGesture {
-                            viewModel.selectedIndex = index
-                            viewModel.selectAndSwitch()
+                    Group {
+                        switch item {
+                        case .app(let app):
+                            AppIconView(app: app, isSelected: isSelected, size: viewModel.iconSize)
+                        case .language(let language):
+                            LanguageTileView(language: language, isSelected: isSelected, size: viewModel.iconSize)
                         }
+                    }
+                    .position(position)
+                    .onTapGesture {
+                        viewModel.selectedIndex = index
+                        viewModel.selectAndSwitch()
+                    }
                 }
 
-                // Selected app name at center
-                if let index = viewModel.selectedIndex, index < viewModel.apps.count {
-                    Text(viewModel.apps[index].name)
+                // Selected item label at center
+                if let index = viewModel.selectedIndex, index < viewModel.items.count {
+                    Text(viewModel.items[index].displayName)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)

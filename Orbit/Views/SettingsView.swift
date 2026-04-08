@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings = SettingsService.shared
     @State private var allApps: [AppInfo] = []
+    @State private var enabledDictationLocales: [DictationLanguage] = []
 
     var body: some View {
         TabView {
@@ -13,9 +14,14 @@ struct SettingsView: View {
                 .tabItem { Label("Pinned", systemImage: "pin") }
             appsTab
                 .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
+            dictationTab
+                .tabItem { Label("Dictation", systemImage: "mic") }
         }
         .frame(width: 420, height: 600)
-        .onAppear { refreshApps() }
+        .onAppear {
+            refreshApps()
+            refreshDictationLocales()
+        }
     }
 
     // MARK: - Shortcut Tab
@@ -221,6 +227,106 @@ struct SettingsView: View {
             }
             .padding(.horizontal)
             .padding(.bottom, 8)
+        }
+    }
+
+    // MARK: - Dictation Tab
+
+    private var dictationTab: some View {
+        Form {
+            Section {
+                Toggle("Show dictation languages in the ring", isOn: $settings.dictationEnabled)
+                    .onChange(of: settings.dictationEnabled) { settings.save() }
+
+                Text("When on, two language tiles appear at the start of the Orbit ring. Selecting one switches the macOS Dictation language and immediately starts dictation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if settings.dictationEnabled {
+                Section("Languages") {
+                    if enabledDictationLocales.isEmpty {
+                        Text("No dictation languages are enabled in System Settings.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        dictationLanguagePicker(
+                            title: "Language 1",
+                            selection: $settings.dictationLanguage1Id
+                        )
+                        dictationLanguagePicker(
+                            title: "Language 2",
+                            selection: $settings.dictationLanguage2Id
+                        )
+                    }
+
+                    Button("Add more languages in System Settings\u{2026}") {
+                        openDictationSystemSettings()
+                    }
+                    .buttonStyle(.borderless)
+
+                    Button("Refresh list") { refreshDictationLocales() }
+                        .buttonStyle(.borderless)
+                }
+
+                Section("Status") {
+                    HStack {
+                        Text("Current dictation language")
+                        Spacer()
+                        Text(DictationService.currentLanguage() ?? "\u{2014}")
+                            .foregroundStyle(.secondary)
+                    }
+                    dictationShortcutStatusRow
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+
+    private func dictationLanguagePicker(
+        title: String,
+        selection: Binding<String?>
+    ) -> some View {
+        Picker(title, selection: selection) {
+            Text("None").tag(String?.none)
+            ForEach(enabledDictationLocales) { language in
+                Text("\(language.flagEmoji)  \(language.displayName)")
+                    .tag(Optional(language.id))
+            }
+        }
+        .onChange(of: selection.wrappedValue) { settings.save() }
+    }
+
+    @ViewBuilder
+    private var dictationShortcutStatusRow: some View {
+        if DictationService.dictationShortcut() == nil {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("No dictation shortcut set", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("The default “Press Fn twice” cannot be triggered programmatically. Choose a keyboard shortcut in System Settings → Keyboard → Dictation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Open System Settings") { openDictationSystemSettings() }
+                    .buttonStyle(.borderless)
+            }
+        } else {
+            HStack {
+                Text("Dictation shortcut")
+                Spacer()
+                Text("Configured ✓")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func refreshDictationLocales() {
+        enabledDictationLocales = DictationService.enabledLocales()
+    }
+
+    private func openDictationSystemSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.keyboard?Dictation") {
+            NSWorkspace.shared.open(url)
         }
     }
 

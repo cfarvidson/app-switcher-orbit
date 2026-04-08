@@ -25,18 +25,22 @@ Orbit/
 ├── AppDelegate.swift           # Menu bar, hotkey wiring, overlay lifecycle
 ├── Info.plist
 ├── Models/
-│   └── RunningApp.swift        # Wraps NSRunningApplication
+│   ├── RunningApp.swift        # Wraps NSRunningApplication
+│   ├── DictationLanguage.swift # Locale id + display name + flag emoji
+│   └── OrbitItem.swift         # Sum type: .app(RunningApp) | .language(DictationLanguage)
 ├── Services/
 │   ├── AppService.swift        # Fetches running GUI apps
 │   ├── HotkeyService.swift     # Carbon global hotkey + mouse button monitors
 │   ├── OverlayPanel.swift      # Floating transparent NSPanel
 │   ├── SettingsService.swift   # UserDefaults persistence (singleton)
+│   ├── DictationService.swift  # macOS dictation language switching + shortcut synthesis
 │   └── UpdateService.swift     # GitHub release update checker
 ├── ViewModels/
 │   └── OrbitViewModel.swift    # Selection logic, angle math, event monitors
 ├── Views/
 │   ├── OrbitView.swift         # SwiftUI radial layout with hover tracking
 │   ├── AppIconView.swift       # Single app icon with selection glow
+│   ├── LanguageTileView.swift  # Dictation language tile (flag emoji + locale badge)
 │   ├── SettingsView.swift      # Tabbed settings window
 │   └── ShortcutRecorderView.swift  # Keyboard shortcut capture
 └── Resources/
@@ -78,6 +82,33 @@ struct RunningApp: Identifiable, Equatable {
 ```
 
 Equality is based on `id` (process ID) only.
+
+## DictationLanguage Model
+
+```swift
+struct DictationLanguage: Identifiable, Equatable, Codable {
+    let id: String          // underscore locale format, e.g. "en_US", "sv_SE"
+    let displayName: String
+    let flagEmoji: String
+}
+```
+
+- `id` uses the underscore format macOS writes into `DictationIMNetworkBasedLocaleIdentifier` (not the hyphen BCP-47 form).
+- `from(localeId:)` parses the region subtag and derives the flag emoji via regional-indicator Unicode (`"sv_SE"` → `🇸🇪`). Falls back to 🏳️ if no 2-letter region is parseable.
+- `displayName` is looked up via `Locale.current.localizedString(forIdentifier:)` after converting the id to hyphen form.
+
+## OrbitItem Model
+
+```swift
+enum OrbitItem: Identifiable, Equatable {
+    case app(RunningApp)
+    case language(DictationLanguage)
+    var id: String { /* "app:<pid>" or "lang:<locale>" */ }
+    var displayName: String { /* RunningApp.name or DictationLanguage.displayName */ }
+}
+```
+
+The ring consumes `[OrbitItem]` so apps and dictation languages can coexist. All ring mechanics (angle math, scroll-to-rotate, arrow navigation, sticky selection) operate on indices over `items`, independent of item type.
 
 ## AppService
 
@@ -168,17 +199,20 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 
 ### Stored Properties
 
-| Property          | Type                                   | Default            | UserDefaults Key    |
-| ----------------- | -------------------------------------- | ------------------ | ------------------- |
-| triggerType       | `.keyboard` / `.mouseButton` / `.both` | `.keyboard`        | `triggerType`       |
-| inputMode         | `.mouse` / `.trackpad`                 | `.mouse`           | `inputMode`         |
-| keyCode           | `UInt32`                               | `kVK_Space` (49)   | `keyCode`           |
-| modifiers         | `UInt32`                               | `optionKey` (2048) | `modifiers`         |
-| keyDisplayName    | `String`                               | `"Space"`          | `keyDisplayName`    |
-| mouseButton       | `Int`                                  | `2` (middle)       | `mouseButton`       |
-| edgeActivation    | `Bool`                                 | `false`            | `edgeActivation`    |
-| pinnedBundleIds   | `[String]`                             | `[]`               | `pinnedBundleIds`   |
-| excludedBundleIds | `Set<String>`                          | `[]`               | `excludedBundleIds` |
+| Property             | Type                                   | Default            | UserDefaults Key       |
+| -------------------- | -------------------------------------- | ------------------ | ---------------------- |
+| triggerType          | `.keyboard` / `.mouseButton` / `.both` | `.keyboard`        | `triggerType`          |
+| inputMode            | `.mouse` / `.trackpad`                 | `.mouse`           | `inputMode`            |
+| keyCode              | `UInt32`                               | `kVK_Space` (49)   | `keyCode`              |
+| modifiers            | `UInt32`                               | `optionKey` (2048) | `modifiers`            |
+| keyDisplayName       | `String`                               | `"Space"`          | `keyDisplayName`       |
+| mouseButton          | `Int`                                  | `2` (middle)       | `mouseButton`          |
+| edgeActivation       | `Bool`                                 | `false`            | `edgeActivation`       |
+| pinnedBundleIds      | `[String]`                             | `[]`               | `pinnedBundleIds`      |
+| excludedBundleIds    | `Set<String>`                          | `[]`               | `excludedBundleIds`    |
+| dictationEnabled     | `Bool`                                 | `false`            | `dictationEnabled`     |
+| dictationLanguage1Id | `String?`                              | `nil`              | `dictationLanguage1Id` |
+| dictationLanguage2Id | `String?`                              | `nil`              | `dictationLanguage2Id` |
 
 All properties are `@Published`. The `save()` method writes all properties to UserDefaults.
 
@@ -186,6 +220,33 @@ All properties are `@Published`. The `save()` method writes all properties to Us
 
 - `shortcutDisplayString` — builds a string like "⌥ Space" from modifier flags and key name, using Unicode symbols (⌃ ⌥ ⇧ ⌘)
 - `mouseButtonDisplayName` — human-readable name for the selected mouse button
+- `dictationLanguages: [DictationLanguage]` — resolved language tiles for the ring. Empty when `dictationEnabled` is false or no language ids are stored. Builds one `DictationLanguage` per non-nil id via `DictationLanguage.from(localeId:)`.
+
+## DictationService
+
+Stateless enum that reads and writes macOS built-in Dictation state via undocumented plist keys (verified on macOS 15.7.4 against open-source references such as tom-barone/dotfiles, benthamite/dotfiles, and ntkme/Swift-Dictation).
+
+### Plist surface
+
+- **Domain:** `com.apple.speech.recognition.AppleSpeechRecognition.prefs`
+- **Active language key:** `DictationIMNetworkBasedLocaleIdentifier` (String, underscore locale format, e.g. `"en_US"`)
+- **Preference order key:** `DictationIMPreferredLanguageIdentifiers` (Array<String>) — reordered so the target locale is first
+- **Enabled locales key:** `VisibleNetworkSRLocaleIdentifiers` (Dict<String, Int>; `1` = enabled)
+- **Shortcut key:** `CustomizedDictationHotKey` (Dict: `keyChar`, `virtualKey`, `modifiers` as NSEvent-style bitmask). Fallback source: `com.apple.symbolichotkeys.plist` → `AppleSymbolicHotKeys[164]`.
+- **Daemon to restart:** `com.apple.inputmethod.ironwood` (DictationIM.app), gracefully terminated via `NSRunningApplication.terminate()`. `launchd` (ThrottleInterval=1) respawns on demand when the synthesized shortcut hits its MachService. **Not** `corespeechd`.
+
+### API
+
+- `enabledLocales() -> [DictationLanguage]` — reads `VisibleNetworkSRLocaleIdentifiers`, returns enabled entries, preserving `DictationIMPreferredLanguageIdentifiers` order.
+- `currentLanguage() -> String?` — reads `DictationIMNetworkBasedLocaleIdentifier`.
+- `dictationShortcut() -> (CGKeyCode, CGEventFlags)?` — returns nil on "Press Fn twice" (virtualKey == 65535) or disabled. Falls back to `AppleSymbolicHotKeys[164]` if `CustomizedDictationHotKey` is absent.
+- `setLanguage(_ localeId:) -> Bool` — idempotent. Writes the active locale and reorders the preferred-language array; gracefully terminates DictationIM. Returns `true` when a restart was triggered (`false` when target already active). Performs a read-back verification after the write; mismatches are logged via `os.Logger`.
+- `startDictation()` — synthesizes the user's configured dictation shortcut via `CGEvent.post(tap: .cghidEventTap)` using a `CGEventSource(stateID: .hidSystemState)`. No-op if no valid shortcut.
+- `switchLanguageAndStart(_ localeId:)` — chains `setLanguage` and `startDictation`. Waits ~75ms between them only when a restart was triggered; zero delay on the fast path.
+
+### Known limitation
+
+Apple Feedback FB9093710 confirms that the `fn` modifier cannot be reliably synthesized via `CGEvent`. When the user's dictation shortcut is set to the default "Press Fn twice", `dictationShortcut()` returns nil and `startDictation()` is a no-op. The Dictation settings tab detects this and shows an orange warning with a deep link to System Settings → Keyboard → Dictation.
 
 ## OrbitViewModel
 
@@ -206,22 +267,32 @@ Geometry is snapshotted once per show to avoid reading SettingsService on every 
 ### Key Properties
 
 - `isVisible: Bool` — controls overlay visibility
-- `apps: [RunningApp]` — current running apps
-- `selectedIndex: Int?` — which app is highlighted
+- `items: [OrbitItem]` — current ring contents: dictation-language tiles (when `dictationEnabled` and configured) followed by pinned apps followed by other running apps
+- `selectedIndex: Int?` — which item is highlighted
 - `onDismiss: (() -> Void)?` — callback to hide the overlay panel
+
+### Ring Contents (show)
+
+On each `show()`, the ring is rebuilt as:
+
+```
+items = SettingsService.dictationLanguages.map(.language) + AppService.runningApps(...).map(.app)
+```
+
+Languages come first so their ring positions remain stable regardless of which apps are running (muscle memory). Languages only appear when `SettingsService.dictationEnabled == true` and at least one language id is stored.
 
 ### Angle & Position Math
 
-- Apps are distributed evenly around a circle: `angle = (2π / count) × index - π/2`
-- The `-π/2` offset places the first app at the 12 o'clock position
+- Items are distributed evenly around a circle: `angle = (2π / count) × index - π/2`
+- The `-π/2` offset places the first item at the 12 o'clock position
 - `positionForIndex` converts the angle to (x, y) using `center + radius × (cos, -sin)` (Y is inverted for SwiftUI coordinates)
 
 ### Selection Logic (updateSelection)
 
 - Ignore if mouse is within `deadZone` of center
 - Calculate mouse angle: `atan2(-dy, dx)`, normalized to [0, 2π)
-- Find the app whose angle is closest to the mouse angle (handling the 0/2π wrap)
-- Set `selectedIndex` to that app
+- Find the item whose angle is closest to the mouse angle (handling the 0/2π wrap)
+- Set `selectedIndex` to that item
 - If edge activation is enabled and mouse distance exceeds `radius + iconSize × 0.6`, automatically trigger `selectAndSwitch()` — no click needed
 
 ### Sticky Selection (handleHoverEnded)
@@ -260,8 +331,10 @@ All monitors are removed on dismiss.
 ### selectAndSwitch
 
 - Dismisses the overlay
-- After a 50ms delay, calls `app.app.activate()` on the selected `NSRunningApplication`
-- The delay ensures the overlay is fully hidden before activation
+- After a 50ms delay, branches on the selected `OrbitItem`:
+  - `.app(let app)` — calls `app.app.activate()` on the `NSRunningApplication`
+  - `.language(let language)` — calls `DictationService.switchLanguageAndStart(language.id)`
+- The delay ensures the overlay is fully hidden before activation or language switch
 
 ## OrbitView (SwiftUI)
 
@@ -271,8 +344,8 @@ Layered inside a `ZStack`, only rendered when `viewModel.isVisible`:
 2. **Ring guide** — `Circle` stroke, white at 10% opacity, 1pt line, diameter = `radius × 2`
 3. **Center dot** — 6pt white circle at 40% opacity
 4. **Selection line** — dashed `Path` from center to selected app's position, accent color at 40% opacity, dash pattern `[4, 4]`
-5. **App icons** — `ForEach` over enumerated apps, each `AppIconView` positioned via `.position()`; tap triggers `selectAndSwitch()`
-6. **App name label** — shown when an app is selected, centered below the middle in a capsule with `.ultraThinMaterial`
+5. **Ring items** — `ForEach` over enumerated `viewModel.items`, switching on `OrbitItem` to render either an `AppIconView` (for `.app`) or a `LanguageTileView` (for `.language`). Each is positioned via `.position()`; tap triggers `selectAndSwitch()`.
+6. **Item label** — shown when an item is selected, centered below the middle in a capsule with `.ultraThinMaterial`. Reads `viewModel.items[index].displayName` so it works for both apps and languages.
 
 ### Interactions
 
@@ -292,9 +365,19 @@ Displays a single app icon:
   - Scale up to 1.25×
 - Animation: `.easeInOut(0.12)` on `isSelected`
 
+## LanguageTileView
+
+Displays a dictation-language tile. Visually mirrors `AppIconView` so both item types share the same affordances (rounded rect, selection glow, stroke, scale).
+
+- `RoundedRectangle(cornerRadius: 12)` filled with `.ultraThinMaterial`
+- Flag emoji centered as a `Text` at `size * 0.7`
+- Small bottom-right badge with the uppercased language subtag (e.g. `"EN"`, `"SV"`) in a black capsule — secondary signifier so flags aren't the only cue
+- Same selection treatment as `AppIconView`: accent glow + stroke + `scaleEffect(1.25)`
+- Animation: `.easeInOut(0.12)` on `isSelected`
+
 ## SettingsView
 
-A `TabView` with three tabs:
+A `TabView` with four tabs:
 
 ### Shortcut Tab
 
@@ -320,6 +403,18 @@ A `TabView` with three tabs:
 - Toggle controls whether the app's bundle ID is in `excludedBundleIds`
 - Footer: Refresh button + count of hidden apps
 - Apps list is refreshed on appear and via the Refresh button
+
+### Dictation Tab
+
+- **Master enable toggle**: "Show dictation languages in the ring" — bound to `SettingsService.dictationEnabled`. Off by default because writing the undocumented plist keys is opt-in.
+- **Languages section** (visible only when enabled):
+  - Two language pickers ("Language 1" and "Language 2") populated from `DictationService.enabledLocales()`. Each includes a "None" option. Items render as "🇺🇸 English (US)".
+  - "Add more languages in System Settings…" button opens `x-apple.systempreferences:com.apple.preference.keyboard?Dictation` via `NSWorkspace.open`.
+  - "Refresh list" button re-reads the enabled locales.
+- **Status section** (visible only when enabled):
+  - Current dictation language row — shows `DictationService.currentLanguage()` or `—`.
+  - Dictation shortcut status — if `DictationService.dictationShortcut()` returns nil (i.e. the user is on "Press Fn twice" or has no shortcut), shows an orange warning label, an explanatory caption, and an "Open System Settings" button. Otherwise shows "Configured ✓".
+- Uses `.formStyle(.grouped)`. Enabled locales are loaded via `refreshDictationLocales()` in `onAppear`.
 
 ### AppInfo Helper
 
