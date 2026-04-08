@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.11
+
+### New Features
+
+- **Dictation language switcher** — Opt-in feature that adds two language tiles at the start of the Orbit ring. Click a tile to switch the macOS Dictation language and immediately start dictation in the focused text field. Configure your two languages in the new Dictation settings tab (pick from the languages you've already enabled in System Settings → Keyboard → Dictation). Requires a real keyboard shortcut for Dictation — the default "Press Fn twice" cannot be triggered programmatically.
+
 ## 1.0.10
 
 ### Bug Fixes
