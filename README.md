@@ -13,6 +13,24 @@ A macOS radial app switcher inspired by Hitman's weapon wheel. Press a shortcut 
   <img src="screenshot.png" width="600" alt="Orbit in action">
 </p>
 
+## Features
+
+- **Radial app switcher** — running apps arranged in a Hitman-style weapon wheel around your cursor
+- **Multiple triggers** — keyboard shortcut, mouse button (middle / button 4 / button 5), or both at once
+- **Mouse and trackpad modes** — trackpad mode has larger targets, bigger ring, and sticky selection
+- **Pinned apps** — pin apps to fixed angles around the ring so muscle memory works regardless of which other apps are open
+- **App filtering** — hide apps you don't want in the ring
+- **Edge activation** — optional auto-switch when the cursor reaches the ring edge, no click needed
+- **Scroll and arrow-key navigation** — two-finger swipe / scroll wheel rotates the highlight; Left/Right arrows + Enter also work
+- **Smart browser suppression** — when triggered with a mouse button, Orbit detects links and tab bars in Safari/Chrome and suppresses the trigger so middle-click-to-open and middle-click-to-close still work
+- **On-device dictation via Whisper** — opt-in language tiles at the start of the ring run [WhisperKit](https://github.com/argmaxinc/WhisperKit) (CoreML) entirely locally; click a tile and speak into the focused field. Audio never leaves your Mac.
+  - Choose from Tiny / Base / Small / Medium / Large v3 Turbo / Large v3 models
+  - Floating "Listening…" indicator near the cursor; click or re-press the hotkey to commit, ESC to cancel
+  - Pastes via `NSPasteboard` + synthesized `Cmd+V` so it works in Electron/Chromium apps (Cursor, VS Code, Slack, Discord, Notion)
+  - Pasted text is marked transient so clipboard history managers (Maccy, Paste, Pastebot, Raycast, Alfred) skip the entries
+- **Update checker** — checks GitHub Releases on launch and surfaces an "Update Available" item in the menu; manual "Check for Updates…" also available
+- **Menu bar only** — no Dock icon, runs as `LSUIElement`
+
 ## How It Works
 
 1. Press **Option+Space** (default) — a radial HUD appears at your mouse position
