@@ -7,8 +7,7 @@ A macOS radial app switcher inspired by Hitman's weapon wheel. Press a global sh
 - macOS 14+ (Sonoma)
 - Swift 5.9
 - SwiftUI + AppKit hybrid (no storyboards, no XIBs)
-- Xcode project (not Swift Package Manager)
-- No third-party dependencies
+- Xcode project with one Swift Package dependency: [WhisperKit](https://github.com/argmaxinc/WhisperKit) (≥ 0.9.0) for on-device speech recognition
 
 ## App Type
 
@@ -29,12 +28,13 @@ Orbit/
 │   ├── DictationLanguage.swift # Locale id + display name + flag emoji
 │   └── OrbitItem.swift         # Sum type: .app(RunningApp) | .language(DictationLanguage)
 ├── Services/
-│   ├── AppService.swift        # Fetches running GUI apps
-│   ├── HotkeyService.swift     # Carbon global hotkey + mouse button monitors
-│   ├── OverlayPanel.swift      # Floating transparent NSPanel
-│   ├── SettingsService.swift   # UserDefaults persistence (singleton)
-│   ├── DictationService.swift  # macOS dictation language switching + shortcut synthesis
-│   └── UpdateService.swift     # GitHub release update checker
+│   ├── AppService.swift             # Fetches running GUI apps
+│   ├── HotkeyService.swift          # Carbon global hotkey + mouse button monitors
+│   ├── OverlayPanel.swift           # Floating transparent NSPanel
+│   ├── SettingsService.swift        # UserDefaults persistence (singleton)
+│   ├── DictationService.swift       # macOS dictation language plist writes + entry point that hands off to SpeechRecognitionService
+│   ├── SpeechRecognitionService.swift # In-process WhisperKit pipeline (audio capture, VAD, transcription, text injection)
+│   └── UpdateService.swift          # GitHub release update checker
 ├── ViewModels/
 │   └── OrbitViewModel.swift    # Selection logic, angle math, event monitors
 ├── Views/
@@ -57,7 +57,7 @@ Orbit/
 
 Responsibilities:
 
-1. **Accessibility prompt** — on launch, call `AXIsProcessTrustedWithOptions` with the prompt option to request Accessibility permissions
+1. **Accessibility prompt** — on launch, call `AXIsProcessTrustedWithOptions` with the prompt option to request Accessibility permissions. Also detects the **stale-TCC-entry** case (after every rebuild for ad-hoc-signed apps): if `AXIsProcessTrusted()` returns false even though the entry exists in System Settings, shows a custom warning alert with an "Open Privacy Settings…" button explaining the user needs to toggle Orbit off and back on. Without this check the rebuild silently breaks the global hotkey suppression and the dictation paste path because `CGEvent.post` is filtered while the Carbon hotkey keeps working
 2. **Menu bar status item** — `NSStatusBar.system.statusItem` with the SF Symbol `circle.dotted`
    - Menu items: Settings (Cmd+,), About Orbit, Quit Orbit (Cmd+Q)
    - Disabled info items show current activation method and input mode
@@ -199,20 +199,21 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 
 ### Stored Properties
 
-| Property             | Type                                   | Default            | UserDefaults Key       |
-| -------------------- | -------------------------------------- | ------------------ | ---------------------- |
-| triggerType          | `.keyboard` / `.mouseButton` / `.both` | `.keyboard`        | `triggerType`          |
-| inputMode            | `.mouse` / `.trackpad`                 | `.mouse`           | `inputMode`            |
-| keyCode              | `UInt32`                               | `kVK_Space` (49)   | `keyCode`              |
-| modifiers            | `UInt32`                               | `optionKey` (2048) | `modifiers`            |
-| keyDisplayName       | `String`                               | `"Space"`          | `keyDisplayName`       |
-| mouseButton          | `Int`                                  | `2` (middle)       | `mouseButton`          |
-| edgeActivation       | `Bool`                                 | `false`            | `edgeActivation`       |
-| pinnedBundleIds      | `[String]`                             | `[]`               | `pinnedBundleIds`      |
-| excludedBundleIds    | `Set<String>`                          | `[]`               | `excludedBundleIds`    |
-| dictationEnabled     | `Bool`                                 | `false`            | `dictationEnabled`     |
-| dictationLanguage1Id | `String?`                              | `nil`              | `dictationLanguage1Id` |
-| dictationLanguage2Id | `String?`                              | `nil`              | `dictationLanguage2Id` |
+| Property             | Type                                   | Default                  | UserDefaults Key       |
+| -------------------- | -------------------------------------- | ------------------------ | ---------------------- |
+| triggerType          | `.keyboard` / `.mouseButton` / `.both` | `.keyboard`              | `triggerType`          |
+| inputMode            | `.mouse` / `.trackpad`                 | `.mouse`                 | `inputMode`            |
+| keyCode              | `UInt32`                               | `kVK_Space` (49)         | `keyCode`              |
+| modifiers            | `UInt32`                               | `optionKey` (2048)       | `modifiers`            |
+| keyDisplayName       | `String`                               | `"Space"`                | `keyDisplayName`       |
+| mouseButton          | `Int`                                  | `2` (middle)             | `mouseButton`          |
+| edgeActivation       | `Bool`                                 | `false`                  | `edgeActivation`       |
+| pinnedBundleIds      | `[String]`                             | `[]`                     | `pinnedBundleIds`      |
+| excludedBundleIds    | `Set<String>`                          | `[]`                     | `excludedBundleIds`    |
+| dictationEnabled     | `Bool`                                 | `false`                  | `dictationEnabled`     |
+| dictationLanguage1Id | `String?`                              | `nil`                    | `dictationLanguage1Id` |
+| dictationLanguage2Id | `String?`                              | `nil`                    | `dictationLanguage2Id` |
+| dictationModelName   | `String`                               | `"openai_whisper-small"` | `dictationModelName`   |
 
 All properties are `@Published`. The `save()` method writes all properties to UserDefaults.
 
@@ -224,43 +225,105 @@ All properties are `@Published`. The `save()` method writes all properties to Us
 
 ## DictationService
 
-Stateless enum that reads/writes the active macOS built-in Dictation language and starts dictation in the frontmost app. Split into two mechanisms because they have very different constraints:
+Stateless enum that reads/writes the active macOS built-in Dictation language and hands off recognition to `SpeechRecognitionService`. The two responsibilities are independent:
 
-- **Language switch** — undocumented plist writes + graceful DictationIM restart (verified on macOS 15.7.4 against tom-barone/dotfiles, benthamite/dotfiles, and ntkme/Swift-Dictation).
-- **Start dictation** — Accessibility API menu walk that presses the frontmost app's **Edit → Start Dictation…** menu item. **Not** `CGEvent` synthesis (see "Why AX, not CGEvent" below).
+- **Language plist writes** — keep macOS's own Dictation HUD in sync with Orbit's selected language so the user's _physical_ dictation shortcut honors the same language. Cosmetic; Orbit does not depend on it for its own recognition.
+- **Recognition entry point** — `switchLanguageAndStart(_:)` calls `SpeechRecognitionService.shared.start(localeId:)` which runs WhisperKit entirely in-process.
 
-### Plist surface (language switch)
+### Historical note
+
+Earlier versions tried two different paths to start macOS's built-in DictationIM: synthesizing the user's configured shortcut via `CGPostKeyboardEvent`, and walking the frontmost app's `Edit → Start Dictation…` menu via the Accessibility API. Both were abandoned. DictationIM consistently died ~1.4 s after start with `(null)` errors, the locale cache required process kills that opened kill/respawn windows where posts were dropped, and the whole undocumented surface was fragile. Orbit now runs OpenAI Whisper locally via WhisperKit and never invokes DictationIM.
+
+### Plist surface (language switch only)
 
 - **Domain:** `com.apple.speech.recognition.AppleSpeechRecognition.prefs`
 - **Active language key:** `DictationIMNetworkBasedLocaleIdentifier` (String, underscore locale format, e.g. `"en_US"`)
 - **Preference order key:** `DictationIMPreferredLanguageIdentifiers` (Array<String>) — reordered so the target locale is first
 - **Enabled locales key:** `VisibleNetworkSRLocaleIdentifiers` (Dict<String, Int>; `1` = enabled)
-- **Daemon to restart:** `com.apple.inputmethod.ironwood` (DictationIM.app), gracefully terminated via `NSRunningApplication.terminate()`. `launchd` (ThrottleInterval=1) respawns on demand. **Not** `corespeechd`.
 
 ### API
 
 - `enabledLocales() -> [DictationLanguage]` — reads `VisibleNetworkSRLocaleIdentifiers`, returns enabled entries, preserving `DictationIMPreferredLanguageIdentifiers` order.
 - `currentLanguage() -> String?` — reads `DictationIMNetworkBasedLocaleIdentifier`.
-- `setLanguage(_ localeId:) -> Bool` — idempotent. Writes the active locale and reorders the preferred-language array; gracefully terminates DictationIM. Returns `true` when a restart was triggered (`false` when target already active). Performs a read-back verification after the write; mismatches are logged via `os.Logger`.
-- `startDictation()` — walks the frontmost app's menu bar via `AXUIElementCopyAttributeValue`, locates the Edit menu, opens it with `AXPressAction`, then presses the Start Dictation menu item with a second `AXPressAction`. See "Why AX, not CGEvent" below for why this path is necessary.
-- `switchLanguageAndStart(_ localeId:)` — chains `setLanguage` and `startDictation`. Waits 350ms between them when a restart was triggered (DictationIM cold-relaunch), 50ms on the fast path.
+- `setLanguage(_ localeId:)` — idempotent (no-op when the target already matches). Writes the active locale and reorders the preferred-language array. Performs a read-back verification after the write; mismatches are logged via `os.Logger`. Does **not** restart DictationIM — Orbit no longer depends on it.
+- `switchLanguageAndStart(_ localeId:)` — calls `setLanguage` then `SpeechRecognitionService.shared.start(localeId:)`.
 
-### Why AX, not CGEvent
+## SpeechRecognitionService
 
-The brainstorm and plan originally proposed synthesizing the user's configured dictation shortcut via `CGEvent.post`. On macOS 14+ this does not work: the system specifically filters synthesized events from triggering the Dictation SymbolicHotKey as a microphone-privacy protection. The filter applies to both `.cghidEventTap` and `.cgSessionEventTap`, and to AppleScript System Events key-codes alike — all three were empirically verified to fail on macOS 15.7.4 while the physical shortcut keeps working. The Accessibility API path bypasses the filter because it performs a real menu action on the target app, not a simulated keystroke.
+`ObservableObject` singleton (`SpeechRecognitionService.shared`) that runs the entire dictation pipeline in-process. Replaces a previous `SFSpeechRecognizer` implementation, which had shallow language understanding outside English (bad punctuation, no auto-capitalization, no sentence-boundary modeling). WhisperKit handles all 99 Whisper languages with proper punctuation and casing.
 
-### Menu-open-first subtlety
+### Pipeline
 
-`AXPressAction` on an `AXMenuItem` reports success but fires nothing unless the parent menu has actually been opened at least once — NSMenuItem's target/action is resolved lazily. `startDictation()` therefore presses the Edit `AXMenuBarItem` first to open the dropdown, then finds the Start Dictation child and presses it. The open action causes a brief visible menu flash; the menu closes automatically once the child press fires.
+1. `AVAudioEngine` taps the input node and runs samples through an `AVAudioConverter` to 16 kHz mono Float32 (the format Whisper expects).
+2. Each tap callback computes RMS amplitude over the converted samples for a cheap voice-activity detector. Above the threshold = speech, below = silence.
+3. After `silenceTriggerSeconds` of continuous silence following speech (and at least `minSpeechSeconds` of speech in the buffer), or after a hard `maxBufferSeconds` cap, the buffered audio is handed to `WhisperKit.transcribe(audioArray:decodeOptions:)`.
+4. The resulting transcript is filtered (Whisper boilerplate like `[Music]`, `Thanks for watching!` is dropped) and injected into the frontmost app via the **clipboard-paste path** described below. Consecutive utterances within a session are joined with a single space.
+5. ESC cancels the session (discards the buffer). Clicking the floating indicator, re-triggering Orbit, or hitting the 60 s hard cap commits the session — `stop(reason:flushBuffer:)` runs a final transcription on whatever's still in the buffer before tearing down, so the natural "speak then press hotkey to stop" flow doesn't lose the last utterance.
 
-### Localization
+### Text injection (clipboard paste)
 
-The Edit menu title and the "Start Dictation…" item title are matched by a small hardcoded list of localizations (English, Swedish, Danish, Dutch, German, French, Italian, Spanish, Polish). Extend the lists in `isEditMenuTitle` / `isDictationTitle` for additional languages.
+`injectText` does **not** type characters via `CGEvent.keyboardSetUnicodeString`. Two reasons:
 
-### Known limitations
+1. Electron / Chromium apps (Cursor, VS Code, Slack, Discord, Notion, etc.) ignore CGEvent keystrokes that have `virtualKey: 0`. Chromium's input layer validates the key code against the platform keymap and drops events with no real key, regardless of the unicode payload.
+2. Many native apps also dislike unicode-only events for non-ASCII characters; the å in "hallå" can roundtrip through layout-dependent paths.
 
-- The frontmost app must have an Edit menu containing a Start Dictation menu item. Most text-capable apps do (it's system-added by macOS to any app with an NSApplication menu set). Full-screen games, some Electron apps that remove system items, and a few utilities do not — in these cases the language still switches but dictation does not start automatically.
-- Requires Orbit to have Accessibility permission, which it already needs for its core features.
+Instead the implementation:
+
+1. Saves the current `NSPasteboard.general` string contents.
+2. Writes the transcript to the pasteboard, **marking it as transient** so clipboard history managers (Maccy, Paste, Pastebot, Raycast clipboard, Alfred Snippets, etc.) skip it. The marker types come from the [nspasteboard.org](http://nspasteboard.org/) community convention — Orbit declares all three (`org.nspasteboard.TransientType`, `org.nspasteboard.ConcealedType`, `org.nspasteboard.AutoGeneratedType`) up front in the same `declareTypes(_:owner:)` call as `.string`, then writes empty data for each marker before writing the string. Some managers only inspect the declared types at declaration time, not on subsequent `setData` calls, so the order matters.
+3. Synthesizes a real `Cmd+V` keystroke via `CGEvent` (virtualKey 9 with `.maskCommand`) posted on `.cghidEventTap` so it flows through the standard keyboard pipeline exactly as if pressed physically.
+4. After 300 ms (a conservative ceiling for paste latency on slow Electron apps), restores the previous pasteboard contents — also marked transient so the restore doesn't create a duplicate entry in clipboard history (the user's original entry already existed before Orbit touched anything).
+
+The pre-flight log line — `inject pre-flight: frontApp=… bundleId=… axTrusted=…` — captures the frontmost app and `AXIsProcessTrusted()` so failures can be diagnosed from logs alone.
+
+### VAD parameters
+
+| Parameter               | Value   | Purpose                                                             |
+| ----------------------- | ------- | ------------------------------------------------------------------- |
+| `speechRmsThreshold`    | `0.012` | Empirically tuned: quiet speech passes, baseline room noise doesn't |
+| `silenceTriggerSeconds` | `0.8`   | How long to wait after speech before flushing                       |
+| `minSpeechSeconds`      | `0.3`   | Don't bother transcribing very short blips                          |
+| `maxBufferSeconds`      | `25.0`  | Hard cap so a sustained "uhhh" can't accumulate forever             |
+
+We deliberately do **not** transcribe on a fixed timer because Whisper re-decodes the whole buffer each pass with more context, which causes the live transcript to drift (e.g. "stad oskiven omting" → "starta och skriva någonting"). VAD-based one-shot flushes avoid that.
+
+### Decoding options
+
+`DecodingOptions(verbose: false, task: .transcribe, language: <BCP-47 head>, temperature: 0, temperatureFallbackCount: 5, skipSpecialTokens: true, withoutTimestamps: true, noSpeechThreshold: 0.5)`. The locale id passed to `start(localeId:)` is converted to a hyphen-form BCP-47 root (e.g. `"en_US"` → `"en"`) for Whisper.
+
+### Model lifecycle
+
+- **Catalog:** see `WhisperModelOption.all` in `SettingsView.swift` — Tiny / Base / Small (default & recommended) / Medium / Large v3 Turbo / Large v3.
+- **Cache location:** `~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/<modelName>/`. `isModelDownloaded(_:)` walks that folder looking for `.mlmodelc` or `.mlpackage` entries.
+- **Download:** `downloadAndLoadModel(_:)` calls `WhisperKit.download(variant:from:progressCallback:)` against `argmaxinc/whisperkit-coreml` on Hugging Face, then loads the model into RAM via `WhisperKit(WhisperKitConfig(modelFolder:))`. Idempotent — re-entrant calls during an in-flight download are no-ops. Downloads only ever happen from explicit user actions in Settings → Dictation; the language tile never triggers a download.
+- **Prewarm:** `AppDelegate.applicationDidFinishLaunching` calls `prewarm()` if dictation is enabled. Prewarm loads an already-downloaded model into RAM at startup but never initiates a download.
+- **Status:** `@Published var modelStatus: ModelStatus` (`.notDownloaded` / `.downloading(progress, modelName)` / `.loading(modelName)` / `.ready(modelName)` / `.error(message)`) — drives the Settings UI.
+
+### Permissions
+
+`ensurePermissions` uses `AVCaptureDevice.authorizationStatus(for: .audio)` and `AVCaptureDevice.requestAccess(for: .audio)`. Only the microphone permission is required — `Speech.framework` is not used, so `NSSpeechRecognitionUsageDescription` is intentionally absent from `Info.plist`.
+
+### Error surfacing
+
+`start(localeId:onError:)` runs three pre-flight checks before capture begins. Each failure both reports the error via the `onError` callback and shows a user-visible NSAlert so the failure isn't silent:
+
+| Failure                       | Alert                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| Selected model not downloaded | "Dictation needs setup" → opens Orbit Settings via `.orbitOpenSettings` notification |
+| Microphone permission denied  | "Microphone access denied" → opens System Settings → Privacy & Security → Microphone |
+| Audio engine fails to start   | NSLogged; `onError` reports the underlying error                                     |
+
+### Re-entrancy and lockout
+
+`start(localeId:)` is guarded by a 0.75 s `startLockout` and a `starting` re-entrancy flag so back-to-back triggers (e.g. a double-click) don't pile up sessions. If a session is already running, `stop(reason:)` is called first; the toggle handler in `AppDelegate.toggleOrbit` also calls `stop` when the user re-presses the global trigger while dictation is active.
+
+### Floating indicator
+
+`RecordingIndicatorPanel` is a borderless non-activating `NSPanel` shown near the cursor while a session is preparing or recording. Two states: `.loading(message)` while the model is being loaded, and `.listening` while audio capture is active. Click anywhere on the panel to stop the session.
+
+### Notification
+
+`Notification.Name.orbitOpenSettings` is posted when the user clicks "Open Settings…" on the missing-model alert. `AppDelegate` listens for it and opens its Settings window.
 
 ## OrbitViewModel
 
@@ -420,15 +483,25 @@ A `TabView` with four tabs:
 
 ### Dictation Tab
 
-- **Master enable toggle**: "Show dictation languages in the ring" — bound to `SettingsService.dictationEnabled`. Off by default because writing the undocumented plist keys is opt-in.
+- **Master enable toggle**: "Show dictation languages in the ring" — bound to `SettingsService.dictationEnabled`. Off by default. Caption explains that selecting a tile starts on-device dictation in that language using a local Whisper model and that audio never leaves the Mac.
 - **Languages section** (visible only when enabled):
   - Two language pickers ("Language 1" and "Language 2") populated from `DictationService.enabledLocales()`. Each includes a "None" option. Items render as "🇺🇸 English (US)".
   - "Add more languages in System Settings…" button opens `x-apple.systempreferences:com.apple.preference.keyboard?Dictation` via `NSWorkspace.open`.
   - "Refresh list" button re-reads the enabled locales.
+- **Speech model section** (visible only when enabled):
+  - Picker over `WhisperModelOption.all` (Tiny / Base / Small recommended / Medium / Large v3 Turbo / Large v3) bound to `SettingsService.dictationModelName`. Changing the picker either eagerly loads the new model (if already on disk) or flips `SpeechRecognitionService.modelStatus` to `.notDownloaded` so the status row exposes the Download button for the new selection.
+  - Description caption from the matching `WhisperModelOption.description`.
+  - Status row driven by `SpeechRecognitionService.modelStatus`:
+    - `.notDownloaded` → orange "Not downloaded" with a "Download <label>" button that calls `downloadAndLoadModel`.
+    - `.downloading(progress, modelName)` → percentage label + linear `ProgressView`.
+    - `.loading(modelName)` → small spinner + "Loading <name>…".
+    - `.ready(modelName)` → green checkmark + "Ready (<name>)".
+    - `.error(message)` → red triangle, error text, and a Retry button.
 - **Status section** (visible only when enabled):
   - Current dictation language row — shows `DictationService.currentLanguage()` or `—`.
-  - Explainer caption describing that Orbit starts dictation by pressing Edit → Start Dictation… in the frontmost app, and that apps without that menu item will get a language switch but no auto-start.
-- Uses `.formStyle(.grouped)`. Enabled locales are loaded via `refreshDictationLocales()` in `onAppear`.
+  - Explainer caption that recognition runs entirely on-device via WhisperKit, that macOS will prompt for microphone permission on first use, and how to stop a session (indicator click or ESC).
+  - "Microphone Privacy…" button that opens `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`.
+- Uses `.formStyle(.grouped)`. Enabled locales are loaded via `refreshDictationLocales()` in `onAppear`. The view holds an `@ObservedObject var speech = SpeechRecognitionService.shared` so model status updates re-render the status row live.
 
 ### AppInfo Helper
 
@@ -459,12 +532,15 @@ A keyboard shortcut recorder:
 
 Key entries:
 
-| Key                             | Value                                                                                                    |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| LSUIElement                     | true (no Dock icon)                                                                                      |
-| NSAccessibilityUsageDescription | "Orbit needs accessibility access to monitor global keyboard shortcuts and switch between applications." |
-| NSMainNibFile                   | (empty string)                                                                                           |
-| NSPrincipalClass                | NSApplication                                                                                            |
+| Key                             | Value                                                                                                                                        |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| LSUIElement                     | true (no Dock icon)                                                                                                                          |
+| NSAccessibilityUsageDescription | "Orbit needs accessibility access to monitor global keyboard shortcuts and switch between applications."                                     |
+| NSMicrophoneUsageDescription    | "Orbit captures microphone audio for on-device speech recognition when you select a language tile in the ring. Audio never leaves your Mac." |
+| NSMainNibFile                   | (empty string)                                                                                                                               |
+| NSPrincipalClass                | NSApplication                                                                                                                                |
+
+`NSSpeechRecognitionUsageDescription` is intentionally absent — Orbit does not use `SFSpeechRecognizer`, only the microphone via `AVAudioEngine` plus WhisperKit's local CoreML pipeline.
 
 ## Entitlements
 

@@ -5,15 +5,20 @@ import SwiftUI
 
 final class OrbitViewModel: ObservableObject {
     @Published var isVisible = false
-    @Published var items: [OrbitItem] = []
+    @Published var positionedItems: [RingLayout.Positioned] = []
     @Published var selectedIndex: Int?
+
+    /// Convenience accessor that mirrors the old `items` property — kept only
+    /// so existing call sites that care about count and index semantics can
+    /// keep working without threading .item through every line.
+    var items: [OrbitItem] { positionedItems.map(\.item) }
 
     var onDismiss: (() -> Void)?
 
-    private(set) var radius: CGFloat = 140
+    private(set) var radius: CGFloat = 180
     private(set) var iconSize: CGFloat = 56
-    private(set) var orbitSize: CGFloat = 400
-    private(set) var deadZone: CGFloat = 35
+    private(set) var orbitSize: CGFloat = 480
+    private(set) var deadZone: CGFloat = 45
     private(set) var stickySelection: Bool = false
     private(set) var edgeActivation: Bool = false
     private(set) var edgeActivationRadius: CGFloat = 0
@@ -38,10 +43,10 @@ final class OrbitViewModel: ObservableObject {
 
     func show() {
         let isTrackpad = SettingsService.shared.inputMode == .trackpad
-        radius = isTrackpad ? 180 : 140
+        radius = isTrackpad ? 230 : 180
         iconSize = isTrackpad ? 68 : 56
-        orbitSize = isTrackpad ? 500 : 400
-        deadZone = isTrackpad ? 45 : 35
+        orbitSize = isTrackpad ? 600 : 480
+        deadZone = isTrackpad ? 55 : 45
         stickySelection = isTrackpad
         edgeActivation = SettingsService.shared.edgeActivation
         edgeActivationRadius = radius + iconSize * 0.6
@@ -49,11 +54,42 @@ final class OrbitViewModel: ObservableObject {
         scrollAccumulator = 0
         lastScrollSelectionTime = 0
 
-        let excluded = SettingsService.shared.excludedBundleIds
-        let pinned = SettingsService.shared.pinnedBundleIds
-        let runningApps = AppService.runningApps(excluding: excluded, pinnedFirst: pinned)
-        let languages = SettingsService.shared.dictationLanguages
-        items = languages.map(OrbitItem.language) + runningApps.map(OrbitItem.app)
+        let settings = SettingsService.shared
+        let excluded = settings.excludedBundleIds
+        let pinned = settings.pinnedBundleIds
+        let languages = settings.dictationLanguages
+
+        // Prune/assign angles for current anchored items before layout.
+        settings.ensureAnchorAngles(for: languages)
+
+        let allApps = AppService.runningApps(excluding: excluded, pinnedFirst: pinned)
+        let pinnedSet = Set(pinned)
+        let anchoredApps = allApps.filter { pinnedSet.contains($0.bundleIdentifier ?? "") }
+        let nonPinnedApps = allApps.filter { !pinnedSet.contains($0.bundleIdentifier ?? "") }
+
+        // Build the anchored (item, angle) list from the user's stored angles.
+        var anchored: [(OrbitItem, Double)] = []
+        for language in languages {
+            if let angle = settings.languageAngles[language.id] {
+                anchored.append((.language(language), angle))
+            }
+        }
+        for app in anchoredApps {
+            if let bundleId = app.bundleIdentifier, let angle = settings.pinnedAngles[bundleId] {
+                anchored.append((.app(app), angle))
+            }
+        }
+
+        NSLog("[Orbit.layout] show() stored langAngles=\(settings.languageAngles) pinAngles=\(settings.pinnedAngles)")
+        NSLog("[Orbit.layout] show() anchored=\(anchored.map { "\($0.0.id)@\(Int($0.1))°" })")
+
+        positionedItems = RingLayout.compute(
+            anchoredItems: anchored,
+            nonPinned: nonPinnedApps.map(OrbitItem.app)
+        )
+
+        NSLog("[Orbit.layout] show() positioned=\(positionedItems.map { "\($0.item.id)@\(Int($0.angleDegrees))°\($0.isAnchored ? "*" : "")" })")
+
         selectedIndex = nil
         isVisible = true
         startMonitors()
@@ -84,17 +120,27 @@ final class OrbitViewModel: ObservableObject {
         }
     }
 
+    /// Angle in math convention (radians, 0 at +x axis, CCW positive), used
+    /// by `updateSelection`'s `atan2(-dy, dx)` mouse-angle comparison.
+    /// Stored angles are clockwise-from-12-o'clock in degrees; convert by
+    /// treating 12 o'clock as +y in math space (i.e., π/2) and going
+    /// clockwise as negative.
     func angleForIndex(_ index: Int) -> Double {
-        guard !items.isEmpty else { return 0 }
-        let slice = (2 * Double.pi) / Double(items.count)
-        return slice * Double(index) - Double.pi / 2
+        guard positionedItems.indices.contains(index) else { return 0 }
+        let degreesFromTwelve = positionedItems[index].angleDegrees
+        return .pi / 2 - (degreesFromTwelve * .pi / 180)
     }
 
+    /// Renders a stored clockwise-from-12-o'clock angle to a SwiftUI point
+    /// inside the ring (y+ down coordinate space). 0° = top, 90° = right,
+    /// 180° = bottom, 270° = left.
     func positionForIndex(_ index: Int) -> CGPoint {
-        let angle = CGFloat(angleForIndex(index))
+        guard positionedItems.indices.contains(index) else { return center }
+        let degrees = positionedItems[index].angleDegrees
+        let radians = degrees * .pi / 180
         return CGPoint(
-            x: center.x + radius * cos(angle),
-            y: center.y - radius * sin(angle)
+            x: center.x + radius * CGFloat(sin(radians)),
+            y: center.y - radius * CGFloat(cos(radians))
         )
     }
 

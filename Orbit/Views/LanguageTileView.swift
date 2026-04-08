@@ -7,18 +7,27 @@ struct LanguageTileView: View {
     let language: DictationLanguage
     let isSelected: Bool
     let size: CGFloat
+    var isAnchored: Bool = true
+
+    /// Language tiles are almost always anchored (that's how the user puts
+    /// them in the ring in the first place). The `isAnchored` flag is still
+    /// threaded through for consistency with `AppIconView` and to let the
+    /// Layout preview render non-anchored mock tiles if we ever need to.
+    private var effectiveSize: CGFloat {
+        isAnchored ? size * 1.2 : size
+    }
 
     var body: some View {
         RoundedRectangle(cornerRadius: 12)
             .fill(.ultraThinMaterial)
             .overlay(
                 Text(language.flagEmoji)
-                    .font(.system(size: size * 0.7))
+                    .font(.system(size: effectiveSize * 0.7))
             )
-            .frame(width: size, height: size)
+            .frame(width: effectiveSize, height: effectiveSize)
             .overlay(alignment: .bottomTrailing) {
                 Text(localeCodeBadge)
-                    .font(.system(size: size * 0.22, weight: .bold))
+                    .font(.system(size: effectiveSize * 0.22, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)

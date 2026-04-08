@@ -26,14 +26,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.overlayPanel?.hideOverlay()
         }
 
+        // If dictation is enabled, pre-load the WhisperKit model in the
+        // background so the first language-tile click doesn't have to wait
+        // several seconds for the CoreML model to load. (Skips silently if
+        // not yet downloaded — user must download from Settings first.)
+        if settings.dictationEnabled {
+            SpeechRecognitionService.shared.prewarm()
+        }
+
+        // Forwarded by SpeechRecognitionService when the user clicks
+        // "Open Settings…" on the missing-model alert.
+        NotificationCenter.default.addObserver(
+            forName: .orbitOpenSettings,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.openSettings()
+        }
+
         checkForUpdate()
     }
 
     // MARK: - Setup
 
     private func promptAccessibilityIfNeeded() {
+        // First-time prompt: only fires when there's NO existing TCC entry.
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
+
+        // Stale-entry detection: when the binary is rebuilt (which happens
+        // on every `./build.sh`), macOS keeps the existing TCC entry but
+        // the stored code requirement no longer matches the new signature.
+        // The entry still appears enabled in System Settings → Privacy &
+        // Security → Accessibility, but TCC silently denies access. The
+        // Carbon hotkey keeps working (it bypasses TCC), but `CGEvent.post`
+        // for synthesized keystrokes is filtered, so dictation paste never
+        // lands. AXIsProcessTrustedWithOptions does NOT re-prompt in this
+        // state because the entry exists; we have to detect it ourselves.
+        //
+        // tccd logs this as: "Failed to match existing code requirement
+        // for subject com.orbit.appswitcher and service kTCCServiceAccessibility".
+        if !AXIsProcessTrusted() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.showStaleAccessibilityAlert()
+            }
+        }
+    }
+
+    private func showStaleAccessibilityAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Accessibility access is disabled"
+        alert.informativeText = """
+            Orbit needs Accessibility access to register the global hotkey, suppress mouse triggers over browser tabs, and inject text from dictation.
+
+            If Orbit already appears in System Settings → Privacy & Security → Accessibility but isn't working (e.g. dictation paste does nothing), the saved entry is from a previous build. Toggle Orbit OFF and then back ON to refresh it.
+            """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open Privacy Settings\u{2026}")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private func setupStatusItem() {
@@ -136,6 +192,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard now.timeIntervalSince(lastToggleTime) > 0.2 else { return }
         lastToggleTime = now
 
+        // If dictation is currently recording, the trigger acts as a stop
+        // button instead of opening the ring. Lets the user cancel a
+        // recording session with the same hotkey/mouse trigger they used
+        // to start it via the language tile.
+        if SpeechRecognitionService.shared.isRunning {
+            SpeechRecognitionService.shared.stop(reason: "orbit retrigger")
+            return
+        }
+
         if viewModel.isVisible {
             viewModel.dismiss()
         } else {
@@ -208,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false

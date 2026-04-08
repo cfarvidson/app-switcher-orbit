@@ -1,8 +1,52 @@
 import Carbon
 import SwiftUI
 
+/// Catalog of WhisperKit models the user can pick from in Settings. The
+/// model identifier matches the `variant` argument WhisperKit's downloader
+/// expects (and corresponds to a folder in
+/// `argmaxinc/whisperkit-coreml` on Hugging Face).
+struct WhisperModelOption: Identifiable {
+    let id: String
+    let label: String
+    let description: String
+
+    static let all: [WhisperModelOption] = [
+        WhisperModelOption(
+            id: "openai_whisper-tiny",
+            label: "Tiny (~75 MB)",
+            description: "Fastest, lowest quality. Good for testing or very limited disk."
+        ),
+        WhisperModelOption(
+            id: "openai_whisper-base",
+            label: "Base (~150 MB)",
+            description: "Balanced. Decent quality, fast cold-start."
+        ),
+        WhisperModelOption(
+            id: "openai_whisper-small",
+            label: "Small (~500 MB) — recommended",
+            description: "Strong sweet spot for dictation. Good multilingual quality, real-time on Apple Silicon."
+        ),
+        WhisperModelOption(
+            id: "openai_whisper-medium",
+            label: "Medium (~1.5 GB)",
+            description: "High quality. Slower cold-start, more RAM. Best for difficult audio."
+        ),
+        WhisperModelOption(
+            id: "openai_whisper-large-v3-v20240930",
+            label: "Large v3 Turbo (~1.5 GB)",
+            description: "Apple's Whisper Turbo (Sep 2024) — large-v3 quality at small-like speed. Best multilingual quality available."
+        ),
+        WhisperModelOption(
+            id: "openai_whisper-large-v3",
+            label: "Large v3 (~2.9 GB)",
+            description: "Full Whisper Large v3. Highest quality, but slower and more RAM than Turbo."
+        ),
+    ]
+}
+
 struct SettingsView: View {
     @ObservedObject var settings = SettingsService.shared
+    @ObservedObject var speech = SpeechRecognitionService.shared
     @State private var allApps: [AppInfo] = []
     @State private var enabledDictationLocales: [DictationLanguage] = []
 
@@ -16,12 +60,24 @@ struct SettingsView: View {
                 .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
             dictationTab
                 .tabItem { Label("Dictation", systemImage: "mic") }
+            layoutTab
+                .tabItem { Label("Layout", systemImage: "circle.grid.cross") }
         }
-        .frame(width: 420, height: 600)
+        .frame(width: 520, height: 640)
         .onAppear {
             refreshApps()
             refreshDictationLocales()
         }
+    }
+
+    // MARK: - Layout Tab
+
+    private var layoutTab: some View {
+        VStack(spacing: 0) {
+            LayoutPreviewView(settings: settings)
+            Spacer()
+        }
+        .padding()
     }
 
     // MARK: - Shortcut Tab
@@ -238,7 +294,7 @@ struct SettingsView: View {
                 Toggle("Show dictation languages in the ring", isOn: $settings.dictationEnabled)
                     .onChange(of: settings.dictationEnabled) { settings.save() }
 
-                Text("When on, two language tiles appear at the start of the Orbit ring. Selecting one switches the macOS Dictation language and immediately starts dictation.")
+                Text("When on, language tiles appear in the Orbit ring. Selecting one starts on-device dictation in that language using a local Whisper model. Recognition runs entirely inside Orbit — no audio leaves your Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -269,6 +325,38 @@ struct SettingsView: View {
                         .buttonStyle(.borderless)
                 }
 
+                Section("Speech model") {
+                    Picker("Model", selection: $settings.dictationModelName) {
+                        ForEach(WhisperModelOption.all) { option in
+                            Text(option.label).tag(option.id)
+                        }
+                    }
+                    .onChange(of: settings.dictationModelName) {
+                        settings.save()
+                        let newModel = settings.dictationModelName
+                        if speech.isModelDownloaded(newModel) {
+                            // Already on disk — load it eagerly so the next
+                            // dictation click is instant.
+                            Task { await speech.downloadAndLoadModel(newModel) }
+                        } else {
+                            // Not downloaded — flip the published status so
+                            // the status row shows the Download button for
+                            // the new selection (otherwise it would still
+                            // show the previously-loaded model's "Ready"
+                            // state, hiding the button).
+                            speech.modelStatus = .notDownloaded
+                        }
+                    }
+
+                    if let info = WhisperModelOption.all.first(where: { $0.id == settings.dictationModelName }) {
+                        Text(info.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    speechModelStatusRow
+                }
+
                 Section("Status") {
                     HStack {
                         Text("Current dictation language")
@@ -282,6 +370,68 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    @ViewBuilder
+    private var speechModelStatusRow: some View {
+        switch speech.modelStatus {
+        case .notDownloaded:
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundStyle(.orange)
+                    Text("Not downloaded")
+                        .foregroundStyle(.secondary)
+                }
+                Button("Download \(WhisperModelOption.all.first { $0.id == settings.dictationModelName }?.label ?? settings.dictationModelName)") {
+                    Task { await speech.downloadAndLoadModel(settings.dictationModelName) }
+                }
+                .buttonStyle(.bordered)
+            }
+        case .downloading(let progress, let modelName):
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Downloading \(modelName)\u{2026}")
+                    Spacer()
+                    Text("\(Int(progress * 100))%")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+            }
+        case .loading(let modelName):
+            HStack {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 16, height: 16)
+                Text("Loading \(modelName)\u{2026}")
+                    .foregroundStyle(.secondary)
+            }
+        case .ready(let modelName):
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("Ready (\(modelName))")
+                    .foregroundStyle(.secondary)
+            }
+        case .error(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                    Text("Error")
+                        .foregroundStyle(.red)
+                }
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Retry") {
+                    Task { await speech.downloadAndLoadModel(settings.dictationModelName) }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
     }
 
     private func dictationLanguagePicker(
@@ -300,23 +450,19 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var dictationShortcutStatusRow: some View {
-        if DictationService.dictationShortcut() == nil {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("No dictation shortcut set", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                Text("Orbit needs a real keyboard shortcut to start dictation. The default “Press Fn twice” cannot be triggered programmatically. Set a shortcut in System Settings → Keyboard → Dictation.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Open System Settings") { openDictationSystemSettings() }
-                    .buttonStyle(.borderless)
-            }
-        } else {
-            HStack {
-                Text("Dictation shortcut")
-                Spacer()
-                Text("Configured ✓")
-                    .foregroundStyle(.secondary)
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Orbit runs OpenAI Whisper locally via WhisperKit (CoreML on Apple Silicon) — recognition is entirely on-device and bypasses the system Dictation HUD. macOS will prompt for microphone permission the first time you click a language tile. Click the floating indicator or press ESC to stop dictation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button("Microphone Privacy\u{2026}") { openMicrophonePrivacy() }
+                .buttonStyle(.borderless)
+        }
+    }
+
+    private func openMicrophonePrivacy() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+            NSWorkspace.shared.open(url)
         }
     }
 
