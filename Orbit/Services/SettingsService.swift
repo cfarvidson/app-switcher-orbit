@@ -25,6 +25,9 @@ final class SettingsService: ObservableObject {
     @Published var edgeActivation: Bool
     @Published var pinnedBundleIds: [String]
     @Published var excludedBundleIds: Set<String>
+    @Published var dictationEnabled: Bool
+    @Published var dictationLanguage1Id: String?
+    @Published var dictationLanguage2Id: String?
 
     private let defaults = UserDefaults.standard
 
@@ -48,6 +51,11 @@ final class SettingsService: ObservableObject {
             : false
         pinnedBundleIds = defaults.stringArray(forKey: "pinnedBundleIds") ?? []
         excludedBundleIds = Set(defaults.stringArray(forKey: "excludedBundleIds") ?? [])
+        dictationEnabled = defaults.object(forKey: "dictationEnabled") != nil
+            ? defaults.bool(forKey: "dictationEnabled")
+            : false
+        dictationLanguage1Id = defaults.string(forKey: "dictationLanguage1Id")
+        dictationLanguage2Id = defaults.string(forKey: "dictationLanguage2Id")
     }
 
     func save() {
@@ -60,6 +68,18 @@ final class SettingsService: ObservableObject {
         defaults.set(edgeActivation, forKey: "edgeActivation")
         defaults.set(pinnedBundleIds, forKey: "pinnedBundleIds")
         defaults.set(Array(excludedBundleIds), forKey: "excludedBundleIds")
+        defaults.set(dictationEnabled, forKey: "dictationEnabled")
+        defaults.set(dictationLanguage1Id, forKey: "dictationLanguage1Id")
+        defaults.set(dictationLanguage2Id, forKey: "dictationLanguage2Id")
+    }
+
+    /// Resolved dictation language tiles for the ring. Empty when disabled or
+    /// no languages are configured.
+    var dictationLanguages: [DictationLanguage] {
+        guard dictationEnabled else { return [] }
+        return [dictationLanguage1Id, dictationLanguage2Id]
+            .compactMap { $0 }
+            .map(DictationLanguage.from(localeId:))
     }
 
     var shortcutDisplayString: String {

@@ -13,27 +13,35 @@
 		34C80F3712FAF719C2C3D455 /* OverlayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */; };
 		4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE9434D67F596027017522B /* AppService.swift */; };
 		76061C98C618303FC707F143 /* RunningApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3785CD7C0BD802AE20E35888 /* RunningApp.swift */; };
+		7E0E67996FFECA54285838C5 /* LanguageTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C06B5315A4E3852D12D113F /* LanguageTileView.swift */; };
+		8A04034A563ABCB999BD0D21 /* DictationLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9BA302562D3076C52B30389 /* DictationLanguage.swift */; };
 		A40A689239DCEC22AEC0A8DE /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FBFD987247464C359E6CBEC /* UpdateService.swift */; };
 		A5911D106F4DE7F9469D7464 /* OrbitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B0E64515D2F209A1ACF98A /* OrbitView.swift */; };
 		A75E73FD358C8583C278D71F /* ShortcutRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */; };
 		B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */; };
 		C317906E1A1CAE792A0C7E9E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9FEF45BFFE010BCA9A5D3000 /* Assets.xcassets */; };
+		C4700FC2697B22DB0E93BD3C /* OrbitItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B59906B22686968DD178A7C6 /* OrbitItem.swift */; };
 		D00A8998B7A668E8CA66B520 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */; };
 		F204E258AC938FD314360C36 /* SettingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */; };
+		F59A8FAABAAA76A241A80F16 /* DictationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05F00F282526C6216A6098BB /* DictationService.swift */; };
 		FE1F71420B0761A4E62AA824 /* OrbitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26EB023126B42D85C78E726C /* OrbitApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		05F00F282526C6216A6098BB /* DictationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationService.swift; sourceTree = "<group>"; };
 		15B0E64515D2F209A1ACF98A /* OrbitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitView.swift; sourceTree = "<group>"; };
 		26EB023126B42D85C78E726C /* OrbitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApp.swift; sourceTree = "<group>"; };
 		3785CD7C0BD802AE20E35888 /* RunningApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunningApp.swift; sourceTree = "<group>"; };
 		4958B2634D8439242ED1028F /* AppIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconView.swift; sourceTree = "<group>"; };
+		4C06B5315A4E3852D12D113F /* LanguageTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageTileView.swift; sourceTree = "<group>"; };
 		4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		6D328D7D403F95D8A287EA8E /* OrbitViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitViewModel.swift; sourceTree = "<group>"; };
 		93E43D9E19F5EF7D480B0771 /* Orbit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orbit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9FBFD987247464C359E6CBEC /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
 		9FEF45BFFE010BCA9A5D3000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
+		B59906B22686968DD178A7C6 /* OrbitItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitItem.swift; sourceTree = "<group>"; };
+		B9BA302562D3076C52B30389 /* DictationLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationLanguage.swift; sourceTree = "<group>"; };
 		BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayPanel.swift; sourceTree = "<group>"; };
 		CBE9434D67F596027017522B /* AppService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppService.swift; sourceTree = "<group>"; };
 		CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorderView.swift; sourceTree = "<group>"; };
@@ -69,6 +77,8 @@
 		67396201ACDD149AA1629C59 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				B9BA302562D3076C52B30389 /* DictationLanguage.swift */,
+				B59906B22686968DD178A7C6 /* OrbitItem.swift */,
 				3785CD7C0BD802AE20E35888 /* RunningApp.swift */,
 			);
 			path = Models;
@@ -86,6 +96,7 @@
 			isa = PBXGroup;
 			children = (
 				4958B2634D8439242ED1028F /* AppIconView.swift */,
+				4C06B5315A4E3852D12D113F /* LanguageTileView.swift */,
 				15B0E64515D2F209A1ACF98A /* OrbitView.swift */,
 				4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */,
 				CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */,
@@ -113,6 +124,7 @@
 			isa = PBXGroup;
 			children = (
 				CBE9434D67F596027017522B /* AppService.swift */,
+				05F00F282526C6216A6098BB /* DictationService.swift */,
 				FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */,
 				BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */,
 				A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */,
@@ -191,8 +203,12 @@
 				D00A8998B7A668E8CA66B520 /* AppDelegate.swift in Sources */,
 				2269A96732CB42EA5C5DD105 /* AppIconView.swift in Sources */,
 				4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */,
+				8A04034A563ABCB999BD0D21 /* DictationLanguage.swift in Sources */,
+				F59A8FAABAAA76A241A80F16 /* DictationService.swift in Sources */,
 				2A49C7AB49AF925F710395B7 /* HotkeyService.swift in Sources */,
+				7E0E67996FFECA54285838C5 /* LanguageTileView.swift in Sources */,
 				FE1F71420B0761A4E62AA824 /* OrbitApp.swift in Sources */,
+				C4700FC2697B22DB0E93BD3C /* OrbitItem.swift in Sources */,
 				A5911D106F4DE7F9469D7464 /* OrbitView.swift in Sources */,
 				0A629DD297BCDCB3D84FD808 /* OrbitViewModel.swift in Sources */,
 				34C80F3712FAF719C2C3D455 /* OverlayPanel.swift in Sources */,

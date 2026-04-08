@@ -5,7 +5,7 @@ import SwiftUI
 
 final class OrbitViewModel: ObservableObject {
     @Published var isVisible = false
-    @Published var apps: [RunningApp] = []
+    @Published var items: [OrbitItem] = []
     @Published var selectedIndex: Int?
 
     var onDismiss: (() -> Void)?
@@ -51,7 +51,9 @@ final class OrbitViewModel: ObservableObject {
 
         let excluded = SettingsService.shared.excludedBundleIds
         let pinned = SettingsService.shared.pinnedBundleIds
-        apps = AppService.runningApps(excluding: excluded, pinnedFirst: pinned)
+        let runningApps = AppService.runningApps(excluding: excluded, pinnedFirst: pinned)
+        let languages = SettingsService.shared.dictationLanguages
+        items = languages.map(OrbitItem.language) + runningApps.map(OrbitItem.app)
         selectedIndex = nil
         isVisible = true
         startMonitors()
@@ -66,20 +68,25 @@ final class OrbitViewModel: ObservableObject {
     }
 
     func selectAndSwitch() {
-        guard let index = selectedIndex, index < apps.count else {
+        guard let index = selectedIndex, index < items.count else {
             dismiss()
             return
         }
-        let app = apps[index]
+        let item = items[index]
         dismiss()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            app.app.activate()
+            switch item {
+            case .app(let app):
+                app.app.activate()
+            case .language(let language):
+                DictationService.switchLanguageAndStart(language.id)
+            }
         }
     }
 
     func angleForIndex(_ index: Int) -> Double {
-        guard !apps.isEmpty else { return 0 }
-        let slice = (2 * Double.pi) / Double(apps.count)
+        guard !items.isEmpty else { return 0 }
+        let slice = (2 * Double.pi) / Double(items.count)
         return slice * Double(index) - Double.pi / 2
     }
 
@@ -96,7 +103,7 @@ final class OrbitViewModel: ObservableObject {
         let dy = Double(mouseInView.y - center.y)
         let distance = sqrt(dx * dx + dy * dy)
 
-        guard distance > Double(deadZone), !apps.isEmpty else {
+        guard distance > Double(deadZone), !items.isEmpty else {
             selectedIndex = nil
             return
         }
@@ -106,9 +113,9 @@ final class OrbitViewModel: ObservableObject {
         var closestIndex = 0
         var closestDiff = Double.infinity
 
-        for i in 0..<apps.count {
-            let appAngle = normalizeAngle(angleForIndex(i))
-            var diff = abs(mouseAngle - appAngle)
+        for i in 0..<items.count {
+            let itemAngle = normalizeAngle(angleForIndex(i))
+            var diff = abs(mouseAngle - itemAngle)
             if diff > Double.pi {
                 diff = 2 * Double.pi - diff
             }
@@ -136,7 +143,7 @@ final class OrbitViewModel: ObservableObject {
     }
 
     func handleScroll(deltaY: CGFloat) {
-        guard !apps.isEmpty else { return }
+        guard !items.isEmpty else { return }
         scrollAccumulator += deltaY
         let threshold: CGFloat = 3.0
         guard abs(scrollAccumulator) > threshold else { return }
@@ -146,7 +153,7 @@ final class OrbitViewModel: ObservableObject {
 
         let direction = scrollAccumulator > 0 ? -1 : 1
         let current = selectedIndex ?? 0
-        selectedIndex = (current + direction + apps.count) % apps.count
+        selectedIndex = (current + direction + items.count) % items.count
         scrollAccumulator -= CGFloat(scrollAccumulator > 0 ? 1 : -1) * threshold
         lastScrollSelectionTime = now
     }
@@ -169,15 +176,15 @@ final class OrbitViewModel: ObservableObject {
                 self.dismiss()
                 return nil
             case kVK_LeftArrow:
-                if !self.apps.isEmpty {
+                if !self.items.isEmpty {
                     let current = self.selectedIndex ?? 0
-                    self.selectedIndex = (current - 1 + self.apps.count) % self.apps.count
+                    self.selectedIndex = (current - 1 + self.items.count) % self.items.count
                 }
                 return nil
             case kVK_RightArrow:
-                if !self.apps.isEmpty {
+                if !self.items.isEmpty {
                     let current = self.selectedIndex ?? 0
-                    self.selectedIndex = (current + 1) % self.apps.count
+                    self.selectedIndex = (current + 1) % self.items.count
                 }
                 return nil
             case kVK_Return:
