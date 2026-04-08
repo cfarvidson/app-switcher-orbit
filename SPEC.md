@@ -224,29 +224,43 @@ All properties are `@Published`. The `save()` method writes all properties to Us
 
 ## DictationService
 
-Stateless enum that reads and writes macOS built-in Dictation state via undocumented plist keys (verified on macOS 15.7.4 against open-source references such as tom-barone/dotfiles, benthamite/dotfiles, and ntkme/Swift-Dictation).
+Stateless enum that reads/writes the active macOS built-in Dictation language and starts dictation in the frontmost app. Split into two mechanisms because they have very different constraints:
 
-### Plist surface
+- **Language switch** — undocumented plist writes + graceful DictationIM restart (verified on macOS 15.7.4 against tom-barone/dotfiles, benthamite/dotfiles, and ntkme/Swift-Dictation).
+- **Start dictation** — Accessibility API menu walk that presses the frontmost app's **Edit → Start Dictation…** menu item. **Not** `CGEvent` synthesis (see "Why AX, not CGEvent" below).
+
+### Plist surface (language switch)
 
 - **Domain:** `com.apple.speech.recognition.AppleSpeechRecognition.prefs`
 - **Active language key:** `DictationIMNetworkBasedLocaleIdentifier` (String, underscore locale format, e.g. `"en_US"`)
 - **Preference order key:** `DictationIMPreferredLanguageIdentifiers` (Array<String>) — reordered so the target locale is first
 - **Enabled locales key:** `VisibleNetworkSRLocaleIdentifiers` (Dict<String, Int>; `1` = enabled)
-- **Shortcut key:** `CustomizedDictationHotKey` (Dict: `keyChar`, `virtualKey`, `modifiers` as NSEvent-style bitmask). Fallback source: `com.apple.symbolichotkeys.plist` → `AppleSymbolicHotKeys[164]`.
-- **Daemon to restart:** `com.apple.inputmethod.ironwood` (DictationIM.app), gracefully terminated via `NSRunningApplication.terminate()`. `launchd` (ThrottleInterval=1) respawns on demand when the synthesized shortcut hits its MachService. **Not** `corespeechd`.
+- **Daemon to restart:** `com.apple.inputmethod.ironwood` (DictationIM.app), gracefully terminated via `NSRunningApplication.terminate()`. `launchd` (ThrottleInterval=1) respawns on demand. **Not** `corespeechd`.
 
 ### API
 
 - `enabledLocales() -> [DictationLanguage]` — reads `VisibleNetworkSRLocaleIdentifiers`, returns enabled entries, preserving `DictationIMPreferredLanguageIdentifiers` order.
 - `currentLanguage() -> String?` — reads `DictationIMNetworkBasedLocaleIdentifier`.
-- `dictationShortcut() -> (CGKeyCode, CGEventFlags)?` — returns nil on "Press Fn twice" (virtualKey == 65535) or disabled. Falls back to `AppleSymbolicHotKeys[164]` if `CustomizedDictationHotKey` is absent.
 - `setLanguage(_ localeId:) -> Bool` — idempotent. Writes the active locale and reorders the preferred-language array; gracefully terminates DictationIM. Returns `true` when a restart was triggered (`false` when target already active). Performs a read-back verification after the write; mismatches are logged via `os.Logger`.
-- `startDictation()` — synthesizes the user's configured dictation shortcut via `CGEvent.post(tap: .cghidEventTap)` using a `CGEventSource(stateID: .hidSystemState)`. No-op if no valid shortcut.
-- `switchLanguageAndStart(_ localeId:)` — chains `setLanguage` and `startDictation`. Waits ~75ms between them only when a restart was triggered; zero delay on the fast path.
+- `startDictation()` — walks the frontmost app's menu bar via `AXUIElementCopyAttributeValue`, locates the Edit menu, opens it with `AXPressAction`, then presses the Start Dictation menu item with a second `AXPressAction`. See "Why AX, not CGEvent" below for why this path is necessary.
+- `switchLanguageAndStart(_ localeId:)` — chains `setLanguage` and `startDictation`. Waits 350ms between them when a restart was triggered (DictationIM cold-relaunch), 50ms on the fast path.
 
-### Known limitation
+### Why AX, not CGEvent
 
-Apple Feedback FB9093710 confirms that the `fn` modifier cannot be reliably synthesized via `CGEvent`. When the user's dictation shortcut is set to the default "Press Fn twice", `dictationShortcut()` returns nil and `startDictation()` is a no-op. The Dictation settings tab detects this and shows an orange warning with a deep link to System Settings → Keyboard → Dictation.
+The brainstorm and plan originally proposed synthesizing the user's configured dictation shortcut via `CGEvent.post`. On macOS 14+ this does not work: the system specifically filters synthesized events from triggering the Dictation SymbolicHotKey as a microphone-privacy protection. The filter applies to both `.cghidEventTap` and `.cgSessionEventTap`, and to AppleScript System Events key-codes alike — all three were empirically verified to fail on macOS 15.7.4 while the physical shortcut keeps working. The Accessibility API path bypasses the filter because it performs a real menu action on the target app, not a simulated keystroke.
+
+### Menu-open-first subtlety
+
+`AXPressAction` on an `AXMenuItem` reports success but fires nothing unless the parent menu has actually been opened at least once — NSMenuItem's target/action is resolved lazily. `startDictation()` therefore presses the Edit `AXMenuBarItem` first to open the dropdown, then finds the Start Dictation child and presses it. The open action causes a brief visible menu flash; the menu closes automatically once the child press fires.
+
+### Localization
+
+The Edit menu title and the "Start Dictation…" item title are matched by a small hardcoded list of localizations (English, Swedish, Danish, Dutch, German, French, Italian, Spanish, Polish). Extend the lists in `isEditMenuTitle` / `isDictationTitle` for additional languages.
+
+### Known limitations
+
+- The frontmost app must have an Edit menu containing a Start Dictation menu item. Most text-capable apps do (it's system-added by macOS to any app with an NSApplication menu set). Full-screen games, some Electron apps that remove system items, and a few utilities do not — in these cases the language still switches but dictation does not start automatically.
+- Requires Orbit to have Accessibility permission, which it already needs for its core features.
 
 ## OrbitViewModel
 
@@ -413,7 +427,7 @@ A `TabView` with four tabs:
   - "Refresh list" button re-reads the enabled locales.
 - **Status section** (visible only when enabled):
   - Current dictation language row — shows `DictationService.currentLanguage()` or `—`.
-  - Dictation shortcut status — if `DictationService.dictationShortcut()` returns nil (i.e. the user is on "Press Fn twice" or has no shortcut), shows an orange warning label, an explanatory caption, and an "Open System Settings" button. Otherwise shows "Configured ✓".
+  - Explainer caption describing that Orbit starts dictation by pressing Edit → Start Dictation… in the frontmost app, and that apps without that menu item will get a language switch but no auto-start.
 - Uses `.formStyle(.grouped)`. Enabled locales are loaded via `refreshDictationLocales()` in `onAppear`.
 
 ### AppInfo Helper
