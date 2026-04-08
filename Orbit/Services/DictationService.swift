@@ -1,10 +1,13 @@
 import AppKit
-import ApplicationServices
+import Carbon
+import CoreGraphics
 import Foundation
 import os
 
-/// Reads and writes macOS built-in Dictation state via undocumented plist keys,
-/// verified on macOS 15.7.4 and cross-referenced against open-source tools.
+/// Reads and writes macOS built-in Dictation state via undocumented plist keys
+/// (verified on macOS 15.7.4 against tom-barone/dotfiles, benthamite/dotfiles,
+/// and ntkme/Swift-Dictation), and starts dictation by synthesizing the user's
+/// configured dictation shortcut via the deprecated `CGPostKeyboardEvent`.
 ///
 /// All key names and daemon targets are documented in
 /// `docs/plans/2026-04-08-feat-dictation-language-switcher-plan.md`. If any key
@@ -13,7 +16,10 @@ import os
 enum DictationService {
     private static let log = Logger(subsystem: "com.orbit.appswitcher", category: "dictation")
     private static let prefsDomain = "com.apple.speech.recognition.AppleSpeechRecognition.prefs"
+    private static let symbolicHotkeysDomain = "com.apple.symbolichotkeys"
     private static let ironwoodBundleId = "com.apple.inputmethod.ironwood"
+    private static let dictationSymbolicHotkeyId = "164"
+    private static let unsetKeyCode = 65535
 
     // MARK: - Reading
 
@@ -38,6 +44,38 @@ enum DictationService {
     static func currentLanguage() -> String? {
         let prefs = UserDefaults.standard.persistentDomain(forName: prefsDomain) ?? [:]
         return prefs["DictationIMNetworkBasedLocaleIdentifier"] as? String
+    }
+
+    /// The user's configured dictation shortcut: virtual key code + modifier
+    /// virtual key codes that need to be held while pressing it. Returns nil
+    /// when no usable shortcut is configured (i.e. the user is on the default
+    /// "Press Fn twice", which cannot be synthesized — see Apple Feedback
+    /// FB9093710).
+    ///
+    /// Reads `CustomizedDictationHotKey` first, then falls back to
+    /// `AppleSymbolicHotKeys[164]`, both of which encode the same shortcut in
+    /// different places.
+    static func dictationShortcut() -> (virtualKey: UInt16, modifierKeys: [UInt16])? {
+        let prefs = UserDefaults.standard.persistentDomain(forName: prefsDomain) ?? [:]
+        if let hk = prefs["CustomizedDictationHotKey"] as? [String: Any],
+           let virtualKey = hk["virtualKey"] as? Int,
+           let modifiers = hk["modifiers"] as? Int,
+           virtualKey != unsetKeyCode
+        {
+            return (UInt16(virtualKey), modifierVirtualKeys(fromBitmask: modifiers))
+        }
+        let symbolic = UserDefaults.standard.persistentDomain(forName: symbolicHotkeysDomain) ?? [:]
+        guard let hotkeys = symbolic["AppleSymbolicHotKeys"] as? [String: Any],
+              let entry = hotkeys[dictationSymbolicHotkeyId] as? [String: Any],
+              (entry["enabled"] as? Int ?? 0) == 1,
+              let value = entry["value"] as? [String: Any],
+              let params = value["parameters"] as? [Int],
+              params.count == 3,
+              params[1] != unsetKeyCode
+        else {
+            return nil
+        }
+        return (UInt16(params[1]), modifierVirtualKeys(fromBitmask: params[2]))
     }
 
     // MARK: - Writing
@@ -76,66 +114,44 @@ enum DictationService {
         return true
     }
 
-    /// Starts dictation in the frontmost app by pressing its "Start Dictation…"
-    /// menu item via the Accessibility API.
+    /// Synthesizes the user's configured dictation shortcut via the deprecated
+    /// `CGPostKeyboardEvent`.
     ///
-    /// Why AX instead of synthesizing a keyboard shortcut: macOS 14+
+    /// Why the deprecated function and not modern `CGEvent.post`: macOS 14+
     /// specifically filters synthesized events from triggering the Dictation
-    /// SymbolicHotKey as a microphone-privacy protection. That filter applies
-    /// to both `.cghidEventTap` and `.cgSessionEventTap` posts and to
-    /// AppleScript System Events key-codes alike — none of them trigger
-    /// Dictation even though they work for every other global shortcut we
-    /// tested. Walking the menu bar via AX and performing `AXPressAction` on
-    /// the Start Dictation menu item bypasses the filter because it invokes
-    /// the real menu action rather than simulating a keystroke.
-    ///
-    /// Important subtlety: NSMenuItem targets are resolved lazily. Pressing a
-    /// menu item whose parent menu has never been opened reports success but
-    /// fires no action. We work around this by pressing the Edit menu bar
-    /// item first (which shows the dropdown and causes NSMenu to wire up its
-    /// items), then pressing Start Dictation inside it. AX subsequently
-    /// auto-closes the menu once the press fires, so the visible flash is
-    /// brief.
+    /// SymbolicHotKey as a microphone-privacy protection. The filter applies to
+    /// every modern injection path I tested — `.cghidEventTap`,
+    /// `.cgSessionEventTap`, and AppleScript `System Events` key codes alike.
+    /// `CGPostKeyboardEvent` predates the modern event-source state machine and
+    /// goes through an older injection path that the filter doesn't gate;
+    /// DictationIM logs `start listening by user action` when invoked this way.
+    /// Verified empirically on macOS 15.7.4. Apple may close this gap in the
+    /// future, in which case `dictationShortcut()` will still return the right
+    /// shortcut and the warning logging here will surface the regression.
     static func startDictation() {
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return }
-        let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
-
-        var menuBarRef: CFTypeRef?
-        let menuBarErr = AXUIElementCopyAttributeValue(
-            appElement,
-            kAXMenuBarAttribute as CFString,
-            &menuBarRef
-        )
-        guard menuBarErr == .success, let menuBarRaw = menuBarRef else {
-            log.warning("AX menu bar lookup failed for \(frontApp.localizedName ?? "?", privacy: .public) err=\(menuBarErr.rawValue)")
+        guard let shortcut = dictationShortcut() else {
+            NSLog("[Orbit.dictation] startDictation aborted — no usable shortcut")
+            log.warning("Cannot start dictation — no usable shortcut configured (likely on 'Press Fn twice')")
             return
         }
-        let menuBar = menuBarRaw as! AXUIElement
-
-        guard let editMenu = firstChild(of: menuBar, matching: isEditMenuTitle) else {
-            log.warning("No Edit menu in \(frontApp.localizedName ?? "?", privacy: .public)")
-            return
+        let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
+        NSLog("[Orbit.dictation] startDictation posting vk=\(shortcut.virtualKey) mods=\(shortcut.modifierKeys) frontmost=\(front)")
+        // Press modifiers, press key, release key, release modifiers in reverse.
+        for modifier in shortcut.modifierKeys {
+            CGPostKeyboardEvent(0, modifier, true)
         }
-
-        // Open the Edit menu first — menu item targets are resolved lazily.
-        guard AXUIElementPerformAction(editMenu, kAXPressAction as CFString) == .success,
-              let editDropdown = firstChild(of: editMenu, matchingRole: kAXMenuRole),
-              let dictationItem = firstChild(of: editDropdown, matching: isDictationTitle)
-        else {
-            log.warning("Could not locate Start Dictation in Edit menu of \(frontApp.localizedName ?? "?", privacy: .public)")
-            AXUIElementPerformAction(editMenu, kAXCancelAction as CFString)
-            return
-        }
-
-        let pressResult = AXUIElementPerformAction(dictationItem, kAXPressAction as CFString)
-        if pressResult != .success {
-            log.error("AXPressAction on Start Dictation failed: err=\(pressResult.rawValue)")
+        CGPostKeyboardEvent(0, shortcut.virtualKey, true)
+        CGPostKeyboardEvent(0, shortcut.virtualKey, false)
+        for modifier in shortcut.modifierKeys.reversed() {
+            CGPostKeyboardEvent(0, modifier, false)
         }
     }
 
     /// Full flow: switch language if it differs from the current one, then
-    /// start dictation via the menu walk. A 350ms delay after a DictationIM
-    /// restart gives the daemon time to relaunch before the menu action fires.
+    /// start dictation. Uses a 350ms delay only when a DictationIM restart was
+    /// triggered (cold-relaunch latency); 50ms on the fast path so the previous
+    /// app has had time to fully regain focus before the synthesized shortcut
+    /// fires.
     static func switchLanguageAndStart(_ localeId: String) {
         let didRestart = setLanguage(localeId)
         let delay: TimeInterval = didRestart ? 0.35 : 0.05
@@ -144,50 +160,25 @@ enum DictationService {
         }
     }
 
-    // MARK: - AX Helpers
+    // MARK: - Helpers
 
-    private static func axAttribute(_ element: AXUIElement, _ name: String) -> Any? {
-        var value: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(element, name as CFString, &value)
-        return result == .success ? value : nil
-    }
-
-    private static func children(of element: AXUIElement) -> [AXUIElement] {
-        (axAttribute(element, kAXChildrenAttribute) as? [AXUIElement]) ?? []
-    }
-
-    private static func firstChild(
-        of element: AXUIElement,
-        matching predicate: (AXUIElement) -> Bool
-    ) -> AXUIElement? {
-        children(of: element).first(where: predicate)
-    }
-
-    private static func firstChild(of element: AXUIElement, matchingRole role: String) -> AXUIElement? {
-        firstChild(of: element) { child in
-            (axAttribute(child, kAXRoleAttribute) as? String) == role
-        }
-    }
-
-    /// Matches the Edit menu across localizations. Matching by title substring
-    /// isn't fully locale-proof, but the menu item in question is part of the
-    /// standard NSApplication menu set and uses the host's system language,
-    /// which for our user is English. Extend the `editTitles` array for
-    /// additional localizations as needed.
-    private static func isEditMenuTitle(_ element: AXUIElement) -> Bool {
-        guard let title = axAttribute(element, kAXTitleAttribute) as? String else { return false }
-        let editTitles = ["Edit", "Redigera", "Rediger", "Redigeren", "Bearbeiten", "Modifier", "Modifica", "Editar", "Edytuj"]
-        return editTitles.contains(title)
-    }
-
-    /// Matches "Start Dictation…" across common localizations. Case-insensitive
-    /// substring match on a small set of stems covers the languages Orbit users
-    /// are most likely to run with.
-    private static func isDictationTitle(_ element: AXUIElement) -> Bool {
-        guard let title = (axAttribute(element, kAXTitleAttribute) as? String)?.lowercased() else {
-            return false
-        }
-        let stems = ["dictation", "diktering", "diktat", "dettatura", "dictée", "dictado", "diktering", "diktat"]
-        return stems.contains { title.contains($0) }
+    /// Maps an NSEvent-style modifier bitmask to the virtual key codes of the
+    /// modifier keys we need to hold while posting the main key. Order matches
+    /// the bit order so the released sequence is the reverse of the pressed
+    /// sequence.
+    private static func modifierVirtualKeys(fromBitmask raw: Int) -> [UInt16] {
+        var keys: [UInt16] = []
+        if raw & 0x040000 != 0 { keys.append(UInt16(kVK_Control)) }
+        if raw & 0x080000 != 0 { keys.append(UInt16(kVK_Option)) }
+        if raw & 0x020000 != 0 { keys.append(UInt16(kVK_Shift)) }
+        if raw & 0x100000 != 0 { keys.append(UInt16(kVK_Command)) }
+        return keys
     }
 }
+
+/// Deprecated Quartz API still exported by CoreGraphics. Predates the modern
+/// `CGEvent.post` filter that blocks synthesized events from triggering the
+/// Dictation SymbolicHotKey. Not declared in Swift's `CoreGraphics` module so
+/// we declare it ourselves with `@_silgen_name`.
+@_silgen_name("CGPostKeyboardEvent")
+private func CGPostKeyboardEvent(_ keyChar: UInt16, _ virtualKey: UInt16, _ keyDown: Bool) -> Int32

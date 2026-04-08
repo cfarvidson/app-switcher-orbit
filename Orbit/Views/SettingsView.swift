@@ -276,9 +276,7 @@ struct SettingsView: View {
                         Text(DictationService.currentLanguage() ?? "\u{2014}")
                             .foregroundStyle(.secondary)
                     }
-                    Text("Orbit starts dictation by pressing Edit → Start Dictation… in the frontmost app. If the app has no Edit menu (e.g. a full-screen game), Orbit still switches the language but cannot start dictation automatically.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    dictationShortcutStatusRow
                 }
             }
         }
@@ -298,6 +296,28 @@ struct SettingsView: View {
             }
         }
         .onChange(of: selection.wrappedValue) { settings.save() }
+    }
+
+    @ViewBuilder
+    private var dictationShortcutStatusRow: some View {
+        if DictationService.dictationShortcut() == nil {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("No dictation shortcut set", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Orbit needs a real keyboard shortcut to start dictation. The default “Press Fn twice” cannot be triggered programmatically. Set a shortcut in System Settings → Keyboard → Dictation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Open System Settings") { openDictationSystemSettings() }
+                    .buttonStyle(.borderless)
+            }
+        } else {
+            HStack {
+                Text("Dictation shortcut")
+                Spacer()
+                Text("Configured ✓")
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private func refreshDictationLocales() {
