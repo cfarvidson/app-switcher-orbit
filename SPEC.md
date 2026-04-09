@@ -362,6 +362,16 @@ We deliberately do **not** transcribe on a fixed timer because Whisper re-decode
 
 At the very top of `beginCapture`, before reading `inputNode.outputFormat`, the service checks `SettingsService.shared.dictationInputDeviceUID`. If non-nil, it resolves the UID to a live `AudioDeviceID` via `AudioInputDeviceService.audioDeviceID(forUID:)` and sets `kAudioOutputUnitProperty_CurrentDevice` on `audioEngine.inputNode.audioUnit` via `AudioUnitSetProperty`. Changing the device before installing the tap is required because the tap format is derived from the active device. If the stored UID does not resolve (device disconnected), the service logs a fallback line and proceeds with the system default — no alert, as unplugging a mic is a normal operating condition.
 
+### Pre-roll capture (warmup)
+
+When the Orbit ring opens, `OrbitViewModel.show()` calls `SpeechRecognitionService.shared.warmupAudioCapture()` (gated on `dictationEnabled` or `translateTileEnabled`). This starts the audio engine in a "warmup" mode that fills a 2-second circular `prerollBuffer` without showing the recording indicator or committing to a session.
+
+If the user clicks a dictation/translate tile, `startInternal` detects warmup is active and calls `promoteWarmupToSession`, which atomically swaps the preroll contents into the session's `audioBuffer` under `audioBufferQueue.sync`. The engine continues running without restart — the user benefits from the audio captured before the click, eliminating the first-words-dropped problem caused by `AVAudioEngine.start()`'s 100-300ms startup latency.
+
+If the user dismisses the ring without clicking a tile, `OrbitViewModel.dismiss()` calls `cancelWarmup()` which stops the engine and discards the preroll buffer.
+
+**Trade-off:** the macOS mic privacy LED in the menu bar lights for the duration the ring is visible, even if the user doesn't dictate. This is the visible cost of pre-roll capture.
+
 ## AudioInputDeviceService
 
 A stateless enum (`Orbit/Services/AudioInputDeviceService.swift`) that wraps CoreAudio device enumeration.

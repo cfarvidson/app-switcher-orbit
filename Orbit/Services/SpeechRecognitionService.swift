@@ -238,6 +238,10 @@ final class SpeechRecognitionService: ObservableObject {
 
         audioEngine.prepare()
         do {
+            // NOTE: starting the engine lights the macOS mic privacy LED in the
+            // menu bar, even though we're not committing to a session. This is the
+            // price of pre-roll capture: we trade a brief LED flicker for the user
+            // not losing the first phoneme of speech to engine startup latency.
             try audioEngine.start()
             NSLog("[Orbit.speech] warmup started")
         } catch {
@@ -754,6 +758,7 @@ final class SpeechRecognitionService: ObservableObject {
 
         var shouldFlush = false
         var bufferDuration: Double = 0
+        var shouldFlipToListening = false
 
         audioBufferQueue.sync {
             if isInPrerollMode {
@@ -766,7 +771,15 @@ final class SpeechRecognitionService: ObservableObject {
                 return
             }
 
-            // Session mode: existing behavior.
+            // Session mode: first-buffer indicator hook (Task 14b).
+            // Read and write under the queue to avoid a data race with
+            // the main-thread writers (warmupAudioCapture, cancelWarmup,
+            // promoteWarmupToSession, stop).
+            if !hasReceivedFirstAudioBuffer {
+                hasReceivedFirstAudioBuffer = true
+                shouldFlipToListening = true
+            }
+
             audioBuffer.append(contentsOf: samples)
             bufferDuration = Double(audioBuffer.count) / targetSampleRate
 
@@ -791,10 +804,7 @@ final class SpeechRecognitionService: ObservableObject {
             }
         }
 
-        // First-buffer indicator hook fires only in session mode (Task 14b).
-        // Outside the queue.sync because indicator update dispatches to main.
-        if !isInPrerollMode, !hasReceivedFirstAudioBuffer {
-            hasReceivedFirstAudioBuffer = true
+        if shouldFlipToListening {
             DispatchQueue.main.async { [weak self] in
                 self?.indicatorPanel?.updateState(.listening)
             }
