@@ -74,6 +74,9 @@ final class OrbitViewModel: ObservableObject {
                 anchored.append((.language(language), angle))
             }
         }
+        if let pair = settings.translatePair, let angle = settings.translateAngle {
+            anchored.append((.translate(pair), angle))
+        }
         for app in anchoredApps {
             if let bundleId = app.bundleIdentifier, let angle = settings.pinnedAngles[bundleId] {
                 anchored.append((.app(app), angle))
@@ -116,6 +119,8 @@ final class OrbitViewModel: ObservableObject {
                 app.app.activate()
             case .language(let language):
                 DictationService.switchLanguageAndStart(language.id)
+            case .translate(let pair):
+                DictationService.startTranslation(pair: pair)
             }
         }
     }
