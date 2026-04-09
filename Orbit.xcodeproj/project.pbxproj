@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0A629DD297BCDCB3D84FD808 /* OrbitViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D328D7D403F95D8A287EA8E /* OrbitViewModel.swift */; };
+		0F2835DDB7523577F8219883 /* AudioInputDeviceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98405B8A69B5B1BA8DC75082 /* AudioInputDeviceService.swift */; };
 		2269A96732CB42EA5C5DD105 /* AppIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4958B2634D8439242ED1028F /* AppIconView.swift */; };
 		267F6A0545306808C8CE2EC9 /* TranslateTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE2E31DAFA2B769E435A20CF /* TranslateTileView.swift */; };
 		2A49C7AB49AF925F710395B7 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */; };
@@ -47,6 +48,7 @@
 		6D328D7D403F95D8A287EA8E /* OrbitViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitViewModel.swift; sourceTree = "<group>"; };
 		72F284CDE33E08C0AF7D7319 /* RingLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingLayout.swift; sourceTree = "<group>"; };
 		93E43D9E19F5EF7D480B0771 /* Orbit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Orbit.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		98405B8A69B5B1BA8DC75082 /* AudioInputDeviceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioInputDeviceService.swift; sourceTree = "<group>"; };
 		9FBFD987247464C359E6CBEC /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
 		9FEF45BFFE010BCA9A5D3000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
@@ -153,6 +155,7 @@
 			isa = PBXGroup;
 			children = (
 				CBE9434D67F596027017522B /* AppService.swift */,
+				98405B8A69B5B1BA8DC75082 /* AudioInputDeviceService.swift */,
 				05F00F282526C6216A6098BB /* DictationService.swift */,
 				FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */,
 				BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */,
@@ -238,6 +241,7 @@
 				D00A8998B7A668E8CA66B520 /* AppDelegate.swift in Sources */,
 				2269A96732CB42EA5C5DD105 /* AppIconView.swift in Sources */,
 				4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */,
+				0F2835DDB7523577F8219883 /* AudioInputDeviceService.swift in Sources */,
 				8A04034A563ABCB999BD0D21 /* DictationLanguage.swift in Sources */,
 				F59A8FAABAAA76A241A80F16 /* DictationService.swift in Sources */,
 				2A49C7AB49AF925F710395B7 /* HotkeyService.swift in Sources */,
