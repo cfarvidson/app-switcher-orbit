@@ -20,14 +20,19 @@ struct TranslateTileView: View {
         RoundedRectangle(cornerRadius: 12)
             .fill(.ultraThinMaterial)
             .overlay(
-                HStack(spacing: effectiveSize * 0.06) {
+                // Flag/arrow proportions sum to ~0.98 of tile width so the
+                // HStack doesn't get clipped — emoji glyphs typically render
+                // 10–15% wider than their nominal font size, eating any
+                // extra slack. Reduced from initial 0.42/0.22/0.06 which
+                // overflowed at all ring sizes.
+                HStack(spacing: effectiveSize * 0.05) {
                     Text(pair.source.flagEmoji)
-                        .font(.system(size: effectiveSize * 0.42))
+                        .font(.system(size: effectiveSize * 0.34))
                     Image(systemName: "arrow.right")
-                        .font(.system(size: effectiveSize * 0.22, weight: .semibold))
+                        .font(.system(size: effectiveSize * 0.20, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Text(pair.target.flagEmoji)
-                        .font(.system(size: effectiveSize * 0.42))
+                        .font(.system(size: effectiveSize * 0.34))
                 }
             )
             .frame(width: effectiveSize, height: effectiveSize)
