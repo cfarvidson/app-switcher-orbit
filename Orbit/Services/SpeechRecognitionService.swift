@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CoreAudio
 import CoreGraphics
 import Foundation
 import WhisperKit
@@ -501,6 +502,40 @@ final class SpeechRecognitionService: ObservableObject {
     // MARK: - Audio capture and chunked transcription
 
     private func beginCapture(localeId: String, onError: @escaping (String) -> Void) {
+        // Configure input device BEFORE reading inputNode.outputFormat — the
+        // format depends on whichever device the input unit is bound to, and
+        // the tap install below uses that format. The user's stored UID is
+        // resolved to a current AudioDeviceID; if the device is no longer
+        // connected (UID not found), we fall through silently and the engine
+        // uses the system default. We do not show an alert because unplugging
+        // a mic is a normal, expected user action.
+        if let uid = SettingsService.shared.dictationInputDeviceUID {
+            if let deviceID = AudioInputDeviceService.audioDeviceID(forUID: uid) {
+                var mutableID = deviceID
+                if let audioUnit = audioEngine.inputNode.audioUnit {
+                    let status = AudioUnitSetProperty(
+                        audioUnit,
+                        kAudioOutputUnitProperty_CurrentDevice,
+                        kAudioUnitScope_Global,
+                        0,
+                        &mutableID,
+                        UInt32(MemoryLayout<AudioDeviceID>.size)
+                    )
+                    if status == noErr {
+                        NSLog("[Orbit.speech] input device set to \(uid)")
+                    } else {
+                        NSLog(
+                            "[Orbit.speech] failed to set input device \(uid): OSStatus=\(status) — falling back to system default"
+                        )
+                    }
+                } else {
+                    NSLog("[Orbit.speech] inputNode.audioUnit is nil — cannot set device, using system default")
+                }
+            } else {
+                NSLog("[Orbit.speech] stored input device \(uid) is not connected — falling back to system default")
+            }
+        }
+
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
 
