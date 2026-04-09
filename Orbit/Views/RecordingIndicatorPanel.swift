@@ -36,16 +36,23 @@ final class RecordingIndicatorPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    func show(localeId: String, state: State, onStopTapped: @escaping () -> Void) {
-        let model = RecordingIndicatorModel(localeId: localeId, state: state)
+    func show(
+        localeId: String,
+        state: State,
+        targetLocaleId: String? = nil,
+        onStopTapped: @escaping () -> Void
+    ) {
+        let model = RecordingIndicatorModel(
+            localeId: localeId,
+            targetLocaleId: targetLocaleId,
+            state: state
+        )
         self.model = model
         let view = RecordingIndicatorView(model: model, onStop: onStopTapped)
         let host = NSHostingView(rootView: view)
         contentView = host
         hostingView = host
 
-        // Anchor ~30pt below the current cursor; clamp into the visible
-        // screen so we don't end up off-screen near a corner.
         let mouse = NSEvent.mouseLocation
         let size = NSSize(width: 220, height: 64)
         var origin = NSPoint(x: mouse.x - size.width / 2, y: mouse.y - size.height - 16)
@@ -74,10 +81,12 @@ final class RecordingIndicatorPanel: NSPanel {
 /// `listening` without rebuilding the SwiftUI view tree.
 final class RecordingIndicatorModel: ObservableObject {
     let localeId: String
+    let targetLocaleId: String?
     @Published var state: RecordingIndicatorPanel.State
 
-    init(localeId: String, state: RecordingIndicatorPanel.State) {
+    init(localeId: String, targetLocaleId: String?, state: RecordingIndicatorPanel.State) {
         self.localeId = localeId
+        self.targetLocaleId = targetLocaleId
         self.state = state
     }
 }
@@ -99,6 +108,21 @@ private struct RecordingIndicatorView: View {
             }
         }
         return scalar.isEmpty ? "🏳️" : scalar
+    }
+
+    private var targetFlagEmoji: String? {
+        guard let targetLocaleId = model.targetLocaleId,
+              let region = targetLocaleId.split(separator: "_").last,
+              region.count == 2
+        else { return nil }
+        let base: UInt32 = 127397
+        var scalar = ""
+        for ch in region.uppercased().unicodeScalars {
+            if let combined = UnicodeScalar(base + ch.value) {
+                scalar.unicodeScalars.append(combined)
+            }
+        }
+        return scalar.isEmpty ? nil : scalar
     }
 
     private var localeBadge: String {
@@ -151,9 +175,17 @@ private struct RecordingIndicatorView: View {
                 HStack(spacing: 4) {
                     Text(flagEmoji)
                         .font(.system(size: 16))
-                    Text(localeBadge)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.primary)
+                    if let targetFlag = targetFlagEmoji {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text(targetFlag)
+                            .font(.system(size: 16))
+                    } else {
+                        Text(localeBadge)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.primary)
+                    }
                     Text(statusText)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)

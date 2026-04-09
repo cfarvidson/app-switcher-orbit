@@ -827,7 +827,11 @@ final class SpeechRecognitionService: ObservableObject {
 
     private func showIndicator(localeId: String, state: RecordingIndicatorPanel.State) {
         let panel = RecordingIndicatorPanel()
-        panel.show(localeId: localeId, state: state) { [weak self] in
+        panel.show(
+            localeId: localeId,
+            state: state,
+            targetLocaleId: currentTranslationTargetId
+        ) { [weak self] in
             DispatchQueue.main.async { self?.stop(reason: "indicator click") }
         }
         indicatorPanel = panel
