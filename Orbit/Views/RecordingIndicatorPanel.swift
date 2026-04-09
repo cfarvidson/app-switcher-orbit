@@ -53,6 +53,8 @@ final class RecordingIndicatorPanel: NSPanel {
         contentView = host
         hostingView = host
 
+        // Anchor ~30pt below the current cursor; clamp into the visible
+        // screen so we don't end up off-screen near a corner.
         let mouse = NSEvent.mouseLocation
         let size = NSSize(width: 220, height: 64)
         var origin = NSPoint(x: mouse.x - size.width / 2, y: mouse.y - size.height - 16)
