@@ -70,14 +70,12 @@ final class SpeechRecognitionService: ObservableObject {
     //
     // RMS-based VAD: each tap callback computes the RMS amplitude of the
     // converted samples. Above threshold = speech; below = silence. After
-    // `silenceTriggerSeconds` of continuous silence following speech, we
-    // transcribe whatever we have.
+    // `SettingsService.shared.dictationSilenceTriggerSeconds` of continuous
+    // silence following speech, we transcribe whatever we have.
 
     /// Amplitude threshold (RMS, 0..1). Tuned empirically for typical mic
     /// gain — quiet speech still passes, baseline room noise doesn't.
     private let speechRmsThreshold: Float = 0.012
-    /// How long the user has to be silent after speech to trigger a flush.
-    private let silenceTriggerSeconds: Double = 0.8
     /// Minimum buffered speech duration before we bother transcribing.
     private let minSpeechSeconds: Double = 0.3
     /// Hard cap on the audio buffer to prevent runaway memory if VAD never

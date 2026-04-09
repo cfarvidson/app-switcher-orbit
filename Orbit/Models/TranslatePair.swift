@@ -1,4 +1,3 @@
-// Orbit/Models/TranslatePair.swift
 import Foundation
 
 /// A configured translate-dictation pair: a source language the user speaks

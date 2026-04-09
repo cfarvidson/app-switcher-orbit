@@ -18,6 +18,19 @@ enum AudioInputDeviceService {
         let id: AudioDeviceID
         let uid: String
         let name: String
+
+        /// Equality and hashing key only on `uid`: the CoreAudio
+        /// `AudioDeviceID` changes across device disconnect/reconnect cycles,
+        /// but `uid` (the persistent `kAudioDevicePropertyDeviceUID` string)
+        /// is stable. Two `Device` values representing the same physical
+        /// microphone should hash equal even if their runtime IDs differ.
+        static func == (lhs: Device, rhs: Device) -> Bool {
+            lhs.uid == rhs.uid
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(uid)
+        }
     }
 
     /// Enumerate every CoreAudio device that has at least one input stream.
