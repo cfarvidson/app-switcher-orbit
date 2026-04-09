@@ -8,6 +8,7 @@ import SwiftUI
 final class RecordingIndicatorPanel: NSPanel {
     enum State: Equatable {
         case loading(message: String)
+        case starting
         case listening
     }
 
@@ -133,20 +134,24 @@ private struct RecordingIndicatorView: View {
     }
 
     private var isLoading: Bool {
-        if case .loading = model.state { return true }
-        return false
+        switch model.state {
+        case .loading, .starting: return true
+        case .listening: return false
+        }
     }
 
     private var statusText: String {
         switch model.state {
         case .loading(let message): return message
-        case .listening: return "Listening…"
+        case .starting: return "Starting\u{2026}"
+        case .listening: return "Listening\u{2026}"
         }
     }
 
     private var hintText: String {
         switch model.state {
         case .loading: return "First-time download \u{2014} please wait"
+        case .starting: return "Almost ready\u{2026}"
         case .listening: return "Click or press ESC to stop"
         }
     }
@@ -157,11 +162,12 @@ private struct RecordingIndicatorView: View {
                 Circle()
                     .fill(isLoading ? Color.gray.opacity(pulse ? 0.5 : 0.2) : Color.red.opacity(pulse ? 0.6 : 0.25))
                     .frame(width: 28, height: 28)
-                if isLoading {
+                switch model.state {
+                case .loading:
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white)
-                } else {
+                case .starting, .listening:
                     Image(systemName: "mic.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white)

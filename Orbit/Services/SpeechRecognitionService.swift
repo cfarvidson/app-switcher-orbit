@@ -109,6 +109,7 @@ final class SpeechRecognitionService: ObservableObject {
     private var currentLocaleId: String = "en_US"
     private var currentTask: DecodingTask = .transcribe
     private var currentTranslationTargetId: String?
+    private var hasReceivedFirstAudioBuffer: Bool = false
 
     private init() {}
 
@@ -227,7 +228,7 @@ final class SpeechRecognitionService: ObservableObject {
             Task { @MainActor in
                 await self.ensureWhisperKitLoaded(onError: onError)
                 if self.whisperKit != nil {
-                    self.indicatorPanel?.updateState(.listening)
+                    self.indicatorPanel?.updateState(.starting)
                     self.beginCapture(localeId: localeId, onError: onError)
                 }
                 self.starting = false
@@ -317,6 +318,7 @@ final class SpeechRecognitionService: ObservableObject {
 
         hasSpeechInBuffer = false
         silentSamplesAfterSpeech = 0
+        hasReceivedFirstAudioBuffer = false
         isRunning = false
 
         // Final flush. Runs async — by the time the transcript lands,
@@ -576,6 +578,13 @@ final class SpeechRecognitionService: ObservableObject {
     }
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, targetFormat: AVAudioFormat) {
+        if !hasReceivedFirstAudioBuffer {
+            hasReceivedFirstAudioBuffer = true
+            DispatchQueue.main.async { [weak self] in
+                self?.indicatorPanel?.updateState(.listening)
+            }
+        }
+
         guard let converter else { return }
 
         // Convert to 16 kHz mono float and append to the rolling buffer.
