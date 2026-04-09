@@ -12,6 +12,7 @@
 		2A49C7AB49AF925F710395B7 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */; };
 		34C80F3712FAF719C2C3D455 /* OverlayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */; };
 		4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE9434D67F596027017522B /* AppService.swift */; };
+		51B1C6F0D884FCB0648E323D /* TranslatePair.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB766088B72E124AC7686749 /* TranslatePair.swift */; };
 		593F29D951061FC9A2C89ADE /* SpeechRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BF5FF75E2668C683B3F6460 /* SpeechRecognitionService.swift */; };
 		76061C98C618303FC707F143 /* RunningApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3785CD7C0BD802AE20E35888 /* RunningApp.swift */; };
 		7E0E67996FFECA54285838C5 /* LanguageTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C06B5315A4E3852D12D113F /* LanguageTileView.swift */; };
@@ -50,6 +51,7 @@
 		A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
 		B59906B22686968DD178A7C6 /* OrbitItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitItem.swift; sourceTree = "<group>"; };
 		B9BA302562D3076C52B30389 /* DictationLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationLanguage.swift; sourceTree = "<group>"; };
+		BB766088B72E124AC7686749 /* TranslatePair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslatePair.swift; sourceTree = "<group>"; };
 		BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayPanel.swift; sourceTree = "<group>"; };
 		CBE9434D67F596027017522B /* AppService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppService.swift; sourceTree = "<group>"; };
 		CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorderView.swift; sourceTree = "<group>"; };
@@ -101,6 +103,7 @@
 				B59906B22686968DD178A7C6 /* OrbitItem.swift */,
 				72F284CDE33E08C0AF7D7319 /* RingLayout.swift */,
 				3785CD7C0BD802AE20E35888 /* RunningApp.swift */,
+				BB766088B72E124AC7686749 /* TranslatePair.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -249,6 +252,7 @@
 				B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */,
 				A75E73FD358C8583C278D71F /* ShortcutRecorderView.swift in Sources */,
 				593F29D951061FC9A2C89ADE /* SpeechRecognitionService.swift in Sources */,
+				51B1C6F0D884FCB0648E323D /* TranslatePair.swift in Sources */,
 				A40A689239DCEC22AEC0A8DE /* UpdateService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
