@@ -633,6 +633,7 @@ final class SpeechRecognitionService: ObservableObject {
             isInPrerollMode = false
             hasSpeechInBuffer = false
             silentSamplesAfterSpeech = 0
+            hasReceivedFirstAudioBuffer = true
         }
         warmupActive = false
         installEscMonitor()
@@ -641,7 +642,6 @@ final class SpeechRecognitionService: ObservableObject {
         // The engine has been delivering buffers since warmup; flip indicator
         // straight to .listening (skip the .starting state, no startup gap).
         indicatorPanel?.updateState(.listening)
-        hasReceivedFirstAudioBuffer = true
         NSLog("[Orbit.speech] promoted warmup to session for locale \(localeId), preroll=\(audioBuffer.count) samples")
     }
 
