@@ -82,8 +82,24 @@ enum DictationService {
     /// Orbit via WhisperKit.
     static func switchLanguageAndStart(_ localeId: String) {
         setLanguage(localeId)
-        SpeechRecognitionService.shared.start(localeId: localeId) { errorMessage in
+        SpeechRecognitionService.shared.startDictation(localeId: localeId) { errorMessage in
             NSLog("[Orbit.dictation] speech start failed: \(errorMessage)")
+        }
+    }
+
+    /// Starts a translate-dictation session: Whisper takes audio in
+    /// `pair.source.id` and pastes English text into the frontmost app.
+    ///
+    /// Deliberately does NOT call `setLanguage()` — system Dictation cannot
+    /// translate, so writing the source locale to AppleSpeechRecognition.prefs
+    /// would misconfigure the user's physical (macOS) dictation shortcut.
+    /// Translation runs entirely inside Orbit via WhisperKit.
+    static func startTranslation(pair: TranslatePair) {
+        SpeechRecognitionService.shared.startTranslation(
+            sourceLocaleId: pair.source.id,
+            targetLocaleId: pair.target.id
+        ) { errorMessage in
+            NSLog("[Orbit.dictation] translation start failed: \(errorMessage)")
         }
     }
 }
