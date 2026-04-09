@@ -1,4 +1,4 @@
-# Translate-to-English Dictation Tile
+# Translate-to-English Dictation Tile + Microphone Device Picker
 
 **Date:** 2026-04-08
 **Status:** Approved (brainstorming complete)
@@ -6,20 +6,37 @@
 
 ## Goal
 
-Add a new Orbit ring tile that lets the user speak in a non-English language and have the transcript pasted into the frontmost app **in English**. The tile is visually distinct from regular dictation language tiles by showing two flags side-by-side: source language → target English variant.
+Two related Dictation-tab improvements bundled into one release because they touch the same files:
+
+1. **Translate tile** — a new Orbit ring tile that lets the user speak in a non-English language and have the transcript pasted into the frontmost app **in English**. The tile is visually distinct from regular dictation language tiles by showing two flags side-by-side: source language → target English variant.
+2. **Microphone input device picker** — a new Settings control that lets the user pick which microphone Whisper listens to. Today `AVAudioEngine.inputNode` silently uses the system default input, which is the wrong device whenever an external mic is plugged in but the user has not switched system default (common with USB mics, AirPods, and audio interfaces).
 
 ## Why
 
-Existing language tiles (`🇸🇪`, `🇫🇷`, …) call WhisperKit with `task: .transcribe`, so a Swedish utterance is pasted as Swedish text. WhisperKit also supports `task: .translate`, which takes audio in any of Whisper's 99 languages and outputs **English** text. The user wants this as a first-class tile in the ring so they can dictate in their native language but produce English output, with no extra steps.
+**Translate tile:** Existing language tiles (`🇸🇪`, `🇫🇷`, …) call WhisperKit with `task: .transcribe`, so a Swedish utterance is pasted as Swedish text. WhisperKit also supports `task: .translate`, which takes audio in any of Whisper's 99 languages and outputs **English** text. The user wants this as a first-class tile in the ring so they can dictate in their native language but produce English output, with no extra steps.
+
+**Microphone picker:** Today `AVAudioEngine.inputNode` uses the system default audio input. When a user plugs in a USB mic, AirPods, or an audio interface but has not switched the macOS system default, Whisper listens to the wrong device — typically the built-in mic with worse quality or in the wrong room. A picker in the Dictation tab lets the user pin Whisper to a specific device independent of the system default.
 
 ## Scope and constraints
+
+### Translate tile
 
 - **Target language is locked to English.** Whisper's `.translate` task only outputs English; other targets would require a separate translation model. This is acceptable for v1 and matches the user's requirement.
 - **Single source language at a time** (configurable in Settings, default `sv_SE`). Not per-locale auto-fanout — keeps the ring uncluttered.
 - **One translate tile in the ring** (not one per enabled language).
 - **Opt-in via a Settings toggle** so existing users do not get a surprise tile after upgrade.
-- **No new test target** — Orbit has no test target today, verification is manual smoke testing.
 - **No changes to system Dictation prefs** when the translate tile is selected. The macOS physical dictation shortcut cannot translate, so leaving it untouched is correct (otherwise we would mislead the user's physical shortcut into thinking it was set up to "translate Swedish to English", which is a thing it cannot do).
+
+### Microphone picker
+
+- **`nil` means "follow system default"** — default for all existing users so nothing changes for anyone who has not opted in.
+- **Applies to both regular dictation and translate** — one device picker covers both code paths because they share `SpeechRecognitionService.beginCapture`.
+- **Device disappearance is not an error** — if the stored device is no longer connected when a session starts, fall back to the system default and log a line. Do not show an alert; the user may have legitimately unplugged their mic.
+- **No live level meter, no permission status row** — explicitly out of scope for v1 (the brainstorming session considered them and deferred).
+
+### Shared constraints
+
+- **No new test target** — Orbit has no test target today, verification is manual smoke testing.
 
 ## Architecture decision: where the task mode lives
 
@@ -78,6 +95,9 @@ The `id` is keyed only on `source.id` because there is exactly one translate til
 | `translateTileEnabled`    | `Bool`    | `false`   | `"translateTileEnabled"`    |
 | `translateSourceLocaleId` | `String`  | `"sv_SE"` | `"translateSourceLocaleId"` |
 | `translateAngle`          | `Double?` | `nil`     | `"translateAngle"`          |
+| `dictationInputDeviceUID` | `String?` | `nil`     | `"dictationInputDeviceUID"` |
+
+`dictationInputDeviceUID` stores the CoreAudio `kAudioDevicePropertyDeviceUID` string (e.g. `"BuiltInMicrophoneDevice"`, `"AppleUSBAudioEngine:Audio Engine:..."`). `nil` means "follow system default input". The CoreAudio UID is stable across reconnects for most devices — this is the same identifier Apple uses internally for persistent device mappings.
 
 ### New computed property
 
@@ -173,6 +193,63 @@ static func startTranslation(pair: TranslatePair) {
 
 `switchLanguageAndStart(_:)` is unchanged in behavior; only the inner call becomes `SpeechRecognitionService.shared.startDictation(localeId:)`.
 
+### `AudioInputDeviceService` (new)
+
+A stateless enum that wraps CoreAudio device enumeration. Lives at `Orbit/Services/AudioInputDeviceService.swift`.
+
+```swift
+enum AudioInputDeviceService {
+    struct Device: Identifiable, Hashable {
+        let id: AudioDeviceID   // CoreAudio AudioDeviceID; the runtime handle
+        let uid: String         // CoreAudio kAudioDevicePropertyDeviceUID; stable across reconnects
+        let name: String        // Human-readable name, e.g. "Shure MV7", "MacBook Pro Microphone"
+    }
+
+    /// Enumerate every CoreAudio device that has at least one input stream,
+    /// sorted alphabetically by name. Output-only devices (speakers, HDMI
+    /// displays) are filtered out. Fast — the whole call is synchronous and
+    /// takes <1ms on a typical Mac.
+    static func listInputDevices() -> [Device]
+
+    /// Resolve a persistent UID back to its current AudioDeviceID. Returns
+    /// nil if no connected device has that UID (e.g. the user unplugged
+    /// their USB mic since last session).
+    static func audioDeviceID(forUID uid: String) -> AudioDeviceID?
+}
+```
+
+Implementation walks `kAudioHardwarePropertyDevices` on the system audio object, filters to devices with at least one `kAudioDevicePropertyStreams` entry on `kAudioObjectPropertyScopeInput`, and reads `kAudioDevicePropertyDeviceUID` (CFString) and `kAudioDevicePropertyDeviceNameCFString` (CFString) for each survivor. No permissions needed — enumeration does not count as microphone access.
+
+### `SpeechRecognitionService.beginCapture` — configure input device before start
+
+`beginCapture` today installs the tap on `audioEngine.inputNode` and starts the engine without ever touching the device. The new version, if `SettingsService.shared.dictationInputDeviceUID` is non-nil, resolves it to an `AudioDeviceID` and pokes the underlying audio unit via `kAudioOutputUnitProperty_CurrentDevice` **before** installing the tap (because changing the device changes the input format, which the tap installation depends on):
+
+```swift
+// Inside beginCapture, at the very top before touching inputNode:
+if let uid = SettingsService.shared.dictationInputDeviceUID,
+   let deviceID = AudioInputDeviceService.audioDeviceID(forUID: uid) {
+    var mutableID = deviceID
+    let audioUnit = audioEngine.inputNode.audioUnit
+    let status = AudioUnitSetProperty(
+        audioUnit!,
+        kAudioOutputUnitProperty_CurrentDevice,
+        kAudioUnitScope_Global,
+        0,
+        &mutableID,
+        UInt32(MemoryLayout<AudioDeviceID>.size)
+    )
+    if status != noErr {
+        NSLog("[Orbit.speech] failed to set input device \(uid): OSStatus=\(status) — falling back to system default")
+    } else {
+        NSLog("[Orbit.speech] input device set to \(uid)")
+    }
+} else if SettingsService.shared.dictationInputDeviceUID != nil {
+    NSLog("[Orbit.speech] stored input device \(SettingsService.shared.dictationInputDeviceUID ?? "") is not connected — falling back to system default")
+}
+```
+
+The two log lines distinguish "we set the device successfully" from "we tried but the device is gone". Either way, `beginCapture` then proceeds with its existing `inputNode.outputFormat(forBus: 0)` read, which will reflect whichever device ended up selected.
+
 ### `OrbitViewModel.show()` integration
 
 After the existing language-anchor loop, append the translate tile if present:
@@ -266,6 +343,28 @@ In the existing Dictation section, a new "Translation" subgroup:
 - Empty-list state: when the filtered list is empty, replace the picker with an inline warning: _"Enable a non-English dictation language in System Settings → Keyboard → Dictation first."_ and a button "Open Dictation Settings…" that opens `x-apple.systempreferences:com.apple.preference.keyboard?Dictation`.
 - Toggling the toggle on triggers `SettingsService.ensureAnchorAngles(for:)` so the new tile gets an angle on next ring open.
 
+In the same Dictation tab, **above** the Translation subsection, a new "Microphone" subsection:
+
+```
+┌─ Microphone ─────────────────────────────────────┐
+│ Input device: [ System Default              ▾ ]  │
+│                                                   │
+│ [ Refresh list ]                                  │
+│                                                   │
+│ Orbit uses this microphone for all dictation      │
+│ and translation. "System Default" follows your    │
+│ macOS audio input setting.                        │
+└───────────────────────────────────────────────────┘
+```
+
+- Picker is bound to `settings.dictationInputDeviceUID` (`String?`).
+- First option is always "System Default" with `tag: String?.none`.
+- Remaining options come from `AudioInputDeviceService.listInputDevices()`, each tagged with `Optional(device.uid)` so the selection stores the stable UID, not the transient AudioDeviceID.
+- Populated on `.onAppear` of the tab via a new `@State var availableInputDevices: [AudioInputDeviceService.Device] = []` + a `refreshInputDevices()` helper.
+- "Refresh list" button re-runs the enumeration, mirroring how "Refresh list" works for dictation languages.
+- If the currently-stored `dictationInputDeviceUID` does not match any enumerated device (the user unplugged the device), the picker still displays the stored UID as a "⚠︎ Not connected (UID)" option — selected but visually flagged — so the user is not surprised by a silent reset to System Default. Selecting System Default in that state writes `nil` and clears the warning.
+- The Microphone section is **always visible** regardless of `dictationEnabled` or `translateTileEnabled`, because the user may want to pre-configure their mic before enabling either feature.
+
 ## Edge cases
 
 | Scenario                                                                                                          | Behavior                                                                                                                                                                                                                                                                                                                                                     |
@@ -278,10 +377,15 @@ In the existing Dictation section, a new "Translation" subgroup:
 | User clicks the translate tile while a session is already running                                                 | Existing `start()` re-entrancy guard stops the previous session and starts the new one.                                                                                                                                                                                                                                                                      |
 | User picks an `en_*` source somehow (e.g., via a stale `translateSourceLocaleId` from before this filter existed) | `translatePair` returns the pair regardless. The tile renders 🇺🇸 → 🇺🇸 which is degenerate but harmless; Whisper's translate task on English audio just outputs the same English text. We do **not** add a defensive guard — the picker filter prevents this case in normal use, and a defensive nil-return would silently hide the tile with no explanation. |
 | Boilerplate filter (`"thanks for watching"` etc.)                                                                 | Unchanged. Translate output is always English, so the existing English-skewed blocklist remains correct.                                                                                                                                                                                                                                                     |
+| Stored `dictationInputDeviceUID` refers to a disconnected device when a session starts                            | `AudioInputDeviceService.audioDeviceID(forUID:)` returns nil → `beginCapture` logs "not connected — falling back to system default" and proceeds without setting a specific device. The session runs on the system default. No alert — silent fallback, because unplugging a mic is not an error.                                                            |
+| User changes `dictationInputDeviceUID` while a session is running                                                 | Irrelevant — the device is read once at `beginCapture` time. The running session finishes on whatever device it started with.                                                                                                                                                                                                                                |
+| User selects a connected device in Settings but starts a session before the picker UI refreshes                   | Not a problem — the picker writes through to `SettingsService` immediately on change, and `beginCapture` reads fresh on every session start.                                                                                                                                                                                                                 |
 
 ## Testing strategy
 
-Orbit has no test target today. Verification is via manual smoke test after implementation:
+Orbit has no test target today. Verification is via manual smoke test after implementation.
+
+### Translate tile
 
 1. Enable the new toggle, set source to `sv_SE`, open Orbit, anchor the tile at any angle.
 2. Click the tile, say _"Hej, hur mår du idag?"_ in Swedish.
@@ -294,6 +398,17 @@ Orbit has no test target today. Verification is via manual smoke test after impl
 9. Toggle the Settings switch off → re-open Orbit → tile is gone but `translateAngle` is preserved (verify by toggling on again — same angle).
 10. Verify `RecordingIndicatorPanel` cleans up properly between regular dictation and translate sessions.
 
+### Microphone device picker
+
+11. Open Settings → Dictation → Microphone subsection. Picker is populated, "System Default" is selected by default.
+12. Click "Refresh list" — picker repopulates without errors.
+13. With System Default selected, dictate from a regular language tile. Verify it works. (Regression check.)
+14. Plug in an external mic (USB or Bluetooth). Click "Refresh list" — the new device appears in the picker.
+15. Select the external mic, dictate. **Expected:** Whisper picks up audio from the external mic, not the built-in. Verify by speaking close to the external mic and far from the built-in — the transcript should be clear.
+16. Without changing the selection, unplug the external mic. Dictate again. **Expected:** transcription still works (silent fallback to System Default), and the Orbit log contains "not connected — falling back to system default".
+17. Re-open Settings → Dictation. The Microphone picker now shows the disconnected device with a "⚠︎ Not connected" prefix. Selecting "System Default" clears the warning.
+18. Pick a connected device, then quit and relaunch Orbit. The picker remembers the selection, and dictation uses that device.
+
 ## SPEC.md updates
 
 After implementation, `SPEC.md` is updated per `CLAUDE.md`:
@@ -302,8 +417,9 @@ After implementation, `SPEC.md` is updated per `CLAUDE.md`:
 - **Services** section:
   - Document the `startDictation` / `startTranslation` split on `SpeechRecognitionService` and the `currentTask` state.
   - Document `DictationService.startTranslation` and the deliberate decision **not** to call `setLanguage` from it.
+  - Document the new `AudioInputDeviceService` enum, its CoreAudio enumeration approach, and the new device-selection step in `SpeechRecognitionService.beginCapture`.
 - **Views** section: add `TranslateTileView` description (visual and layout rules).
-- **Settings** section: add `translateTileEnabled`, `translateSourceLocaleId`, `translateAngle` and the Settings UI subsection.
+- **Settings** section: add `translateTileEnabled`, `translateSourceLocaleId`, `translateAngle`, `dictationInputDeviceUID`, the Translation Settings UI subsection, and the Microphone Settings UI subsection.
 - **Ring layout** section: note that translate tiles use the same anchor mechanism as language tiles, with `translateAngle` preserved across enable/disable cycles.
 
 ## Out of scope (explicitly deferred)
@@ -313,3 +429,6 @@ After implementation, `SPEC.md` is updated per `CLAUDE.md`:
 - Auto-detecting the source language. Whisper supports it via `language: nil`, but the user explicitly wanted a 2-flag tile, which requires a fixed source.
 - Apple Shortcuts.app integration. Could be added later as a separate trigger surface that calls `DictationService.startTranslation` directly.
 - Hotkey trigger that bypasses the ring entirely. Same — additive, doesn't conflict with this design.
+- Live mic input level meter in Settings. Useful for "is my mic working?" feedback but adds an `AVAudioEngine` instance just for the meter; revisit if users actually request it.
+- Mic permission status row in Settings. The existing "Microphone Privacy…" button covers the open-system-settings case, and the alert path on first failed start covers the denied case.
+- Per-tile mic override (e.g. one mic for translate, another for dictation). Single device for all sessions keeps the model simple.
