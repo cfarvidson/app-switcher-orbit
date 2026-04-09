@@ -96,6 +96,13 @@ final class OrbitViewModel: ObservableObject {
         selectedIndex = nil
         isVisible = true
         startMonitors()
+
+        // Pre-roll audio capture so the first phoneme spoken when the user
+        // clicks a tile is not lost to AVAudioEngine startup latency. No-op
+        // if mic permission isn't granted yet (no surprise prompts).
+        if SettingsService.shared.dictationEnabled || SettingsService.shared.translateTileEnabled {
+            SpeechRecognitionService.shared.warmupAudioCapture()
+        }
     }
 
     func dismiss() {
@@ -103,6 +110,7 @@ final class OrbitViewModel: ObservableObject {
         isVisible = false
         selectedIndex = nil
         stopMonitors()
+        SpeechRecognitionService.shared.cancelWarmup()
         onDismiss?()
     }
 

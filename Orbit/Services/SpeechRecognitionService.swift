@@ -111,6 +111,22 @@ final class SpeechRecognitionService: ObservableObject {
     private var currentTranslationTargetId: String?
     private var hasReceivedFirstAudioBuffer: Bool = false
 
+    /// Circular buffer holding the most recent ~2 seconds of audio captured
+    /// during warmup (before the user clicks a tile). On tile click, the
+    /// contents are prepended to the session's `audioBuffer` so the first
+    /// phoneme spoken at click time is not lost to engine startup latency.
+    private var prerollBuffer: [Float] = []
+    private let prerollMaxSamples: Int = 32_000  // 2.0s at 16 kHz mono
+
+    /// True while the service is running the engine in warmup mode (no
+    /// active session). The tap callback uses this flag to decide whether
+    /// new samples go to `prerollBuffer` (circular) or `audioBuffer` (append).
+    private var isInPrerollMode: Bool = false
+
+    /// True once the engine has been started for warmup. Tracks whether
+    /// `cancelWarmup()` actually needs to do anything.
+    private var warmupActive: Bool = false
+
     private init() {}
 
     // MARK: - Public API
@@ -159,6 +175,97 @@ final class SpeechRecognitionService: ObservableObject {
             targetLocaleIdForDisplay: targetLocaleId,
             onError: onError
         )
+    }
+
+    /// Starts the audio engine in warmup mode without showing an indicator
+    /// or committing to a session. Fills a circular preroll buffer with
+    /// recent audio so a subsequent `startDictation` / `startTranslation`
+    /// call can promote the warmup into an active session with the
+    /// last ~2 seconds of audio already captured.
+    ///
+    /// Idempotent — calling while warmup or a session is already running
+    /// is a no-op. Silently does nothing if mic permission is not granted
+    /// (we never want to surprise the user with a permission prompt just
+    /// for opening the ring).
+    func warmupAudioCapture() {
+        // Don't disturb an active session.
+        if isRunning { return }
+        // Don't double-warm.
+        if warmupActive { return }
+        // Permission gate. We use the synchronous status check (not
+        // requestAccess) so opening the ring never triggers a prompt.
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { return }
+
+        // Honor the user's selected input device, same as beginCapture does.
+        if let uid = SettingsService.shared.dictationInputDeviceUID,
+           let deviceID = AudioInputDeviceService.audioDeviceID(forUID: uid),
+           let audioUnit = audioEngine.inputNode.audioUnit
+        {
+            var mutableID = deviceID
+            _ = AudioUnitSetProperty(
+                audioUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &mutableID,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+        }
+
+        let inputNode = audioEngine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: targetSampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            NSLog("[Orbit.speech] warmup: failed to build target format")
+            return
+        }
+        converter = AVAudioConverter(from: inputFormat, to: targetFormat)
+
+        audioBufferQueue.sync {
+            prerollBuffer.removeAll(keepingCapacity: true)
+        }
+        isInPrerollMode = true
+        warmupActive = true
+
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            self?.processAudioBuffer(buffer, targetFormat: targetFormat)
+        }
+
+        audioEngine.prepare()
+        do {
+            try audioEngine.start()
+            NSLog("[Orbit.speech] warmup started")
+        } catch {
+            NSLog("[Orbit.speech] warmup start failed: \(error.localizedDescription)")
+            warmupActive = false
+            isInPrerollMode = false
+        }
+    }
+
+    /// Stops the warmup engine and discards the preroll buffer. Called when
+    /// the user dismisses the Orbit ring without clicking a tile. No-op if
+    /// warmup isn't running, or if a session is currently active (the
+    /// session owns the engine in that case and will tear it down via stop()).
+    func cancelWarmup() {
+        guard warmupActive else { return }
+        if isRunning { return }  // session took over the engine; let it run
+
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        audioEngine.inputNode.removeTap(onBus: 0)
+
+        audioBufferQueue.sync {
+            prerollBuffer.removeAll(keepingCapacity: true)
+        }
+        warmupActive = false
+        isInPrerollMode = false
+        NSLog("[Orbit.speech] warmup cancelled")
     }
 
     private func startInternal(
@@ -228,8 +335,12 @@ final class SpeechRecognitionService: ObservableObject {
             Task { @MainActor in
                 await self.ensureWhisperKitLoaded(onError: onError)
                 if self.whisperKit != nil {
-                    self.indicatorPanel?.updateState(.starting)
-                    self.beginCapture(localeId: localeId, onError: onError)
+                    if self.warmupActive {
+                        self.promoteWarmupToSession(localeId: localeId)
+                    } else {
+                        self.indicatorPanel?.updateState(.starting)
+                        self.beginCapture(localeId: localeId, onError: onError)
+                    }
                 }
                 self.starting = false
             }
@@ -319,6 +430,8 @@ final class SpeechRecognitionService: ObservableObject {
         hasSpeechInBuffer = false
         silentSamplesAfterSpeech = 0
         hasReceivedFirstAudioBuffer = false
+        warmupActive = false
+        isInPrerollMode = false
         isRunning = false
 
         // Final flush. Runs async — by the time the transcript lands,
@@ -503,6 +616,31 @@ final class SpeechRecognitionService: ObservableObject {
 
     // MARK: - Audio capture and chunked transcription
 
+    /// Transition from warmup mode to an active session. Engine and tap are
+    /// already running from `warmupAudioCapture`; we just snapshot the
+    /// preroll into the session buffer, flip the mode flag, and update the
+    /// indicator. The next audio tap callback will write to `audioBuffer`
+    /// instead of `prerollBuffer`.
+    private func promoteWarmupToSession(localeId: String) {
+        audioBufferQueue.sync {
+            audioBuffer.removeAll(keepingCapacity: true)
+            audioBuffer.append(contentsOf: prerollBuffer)
+            prerollBuffer.removeAll(keepingCapacity: true)
+            isInPrerollMode = false
+            hasSpeechInBuffer = false
+            silentSamplesAfterSpeech = 0
+        }
+        warmupActive = false
+        installEscMonitor()
+        scheduleHardCap()
+        isRunning = true
+        // The engine has been delivering buffers since warmup; flip indicator
+        // straight to .listening (skip the .starting state, no startup gap).
+        indicatorPanel?.updateState(.listening)
+        hasReceivedFirstAudioBuffer = true
+        NSLog("[Orbit.speech] promoted warmup to session for locale \(localeId), preroll=\(audioBuffer.count) samples")
+    }
+
     private func beginCapture(localeId: String, onError: @escaping (String) -> Void) {
         // Configure input device BEFORE reading inputNode.outputFormat — the
         // format depends on whichever device the input unit is bound to, and
@@ -578,13 +716,6 @@ final class SpeechRecognitionService: ObservableObject {
     }
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, targetFormat: AVAudioFormat) {
-        if !hasReceivedFirstAudioBuffer {
-            hasReceivedFirstAudioBuffer = true
-            DispatchQueue.main.async { [weak self] in
-                self?.indicatorPanel?.updateState(.listening)
-            }
-        }
-
         guard let converter else { return }
 
         // Convert to 16 kHz mono float and append to the rolling buffer.
@@ -617,7 +748,7 @@ final class SpeechRecognitionService: ObservableObject {
         let frameCount = Int(outputBuffer.frameLength)
         let samples = Array(UnsafeBufferPointer(start: channelData, count: frameCount))
 
-        // RMS amplitude over this frame; cheap VAD.
+        // RMS computed outside the queue (cheap, doesn't need locking).
         let rms = computeRMS(samples)
         let isSpeech = rms > speechRmsThreshold
 
@@ -625,6 +756,17 @@ final class SpeechRecognitionService: ObservableObject {
         var bufferDuration: Double = 0
 
         audioBufferQueue.sync {
+            if isInPrerollMode {
+                // Warmup mode: append to circular preroll buffer, evict
+                // oldest samples when over capacity. No VAD, no flush.
+                prerollBuffer.append(contentsOf: samples)
+                if prerollBuffer.count > prerollMaxSamples {
+                    prerollBuffer.removeFirst(prerollBuffer.count - prerollMaxSamples)
+                }
+                return
+            }
+
+            // Session mode: existing behavior.
             audioBuffer.append(contentsOf: samples)
             bufferDuration = Double(audioBuffer.count) / targetSampleRate
 
@@ -644,6 +786,15 @@ final class SpeechRecognitionService: ObservableObject {
             // flush so we don't accumulate forever.
             if bufferDuration >= maxBufferSeconds, hasSpeechInBuffer {
                 shouldFlush = true
+            }
+        }
+
+        // First-buffer indicator hook fires only in session mode (Task 14b).
+        // Outside the queue.sync because indicator update dispatches to main.
+        if !isInPrerollMode, !hasReceivedFirstAudioBuffer {
+            hasReceivedFirstAudioBuffer = true
+            DispatchQueue.main.async { [weak self] in
+                self?.indicatorPanel?.updateState(.listening)
             }
         }
 
