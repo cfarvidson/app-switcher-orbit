@@ -76,7 +76,7 @@ struct SettingsView: View {
             layoutTab
                 .tabItem { Label("Layout", systemImage: "circle.grid.cross") }
         }
-        .frame(width: 520, height: 640)
+        .frame(width: 520, height: 800)
         .onAppear {
             refreshApps()
             refreshDictationLocales()
@@ -406,6 +406,23 @@ struct SettingsView: View {
                 Text("Orbit uses this microphone for all dictation and translation. \"System Default\" follows your macOS audio input setting.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Pause tolerance")
+                        Spacer()
+                        Text(String(format: "%.1fs", settings.dictationSilenceTriggerSeconds))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(value: $settings.dictationSilenceTriggerSeconds, in: 0.5...3.0, step: 0.1)
+                        .onChange(of: settings.dictationSilenceTriggerSeconds) { settings.save() }
+                    Text("How long Whisper waits in silence before transcribing what you've said. Higher values let you pause mid-sentence without fragmenting the output. Default 0.8s.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Translation") {

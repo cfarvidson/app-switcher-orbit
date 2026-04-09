@@ -29,6 +29,7 @@ final class SettingsService: ObservableObject {
     @Published var dictationLanguage1Id: String?
     @Published var dictationLanguage2Id: String?
     @Published var dictationModelName: String
+    @Published var dictationSilenceTriggerSeconds: Double
     @Published var pinnedAngles: [String: Double]
     @Published var languageAngles: [String: Double]
     @Published var translateTileEnabled: Bool
@@ -66,6 +67,9 @@ final class SettingsService: ObservableObject {
         dictationModelName = SettingsService.sanitizeModelName(
             defaults.string(forKey: "dictationModelName")
         )
+        dictationSilenceTriggerSeconds = defaults.object(forKey: "dictationSilenceTriggerSeconds") != nil
+            ? defaults.double(forKey: "dictationSilenceTriggerSeconds")
+            : 0.8
         pinnedAngles = SettingsService.loadAngleDict(defaults: defaults, key: "pinnedAngles")
         languageAngles = SettingsService.loadAngleDict(defaults: defaults, key: "languageAngles")
         translateTileEnabled = defaults.object(forKey: "translateTileEnabled") != nil
@@ -127,6 +131,7 @@ final class SettingsService: ObservableObject {
         defaults.set(dictationLanguage1Id, forKey: "dictationLanguage1Id")
         defaults.set(dictationLanguage2Id, forKey: "dictationLanguage2Id")
         defaults.set(dictationModelName, forKey: "dictationModelName")
+        defaults.set(dictationSilenceTriggerSeconds, forKey: "dictationSilenceTriggerSeconds")
         defaults.set(pinnedAngles, forKey: "pinnedAngles")
         defaults.set(languageAngles, forKey: "languageAngles")
         defaults.set(translateTileEnabled, forKey: "translateTileEnabled")

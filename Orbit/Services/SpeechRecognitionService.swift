@@ -777,7 +777,9 @@ final class SpeechRecognitionService: ObservableObject {
                 silentSamplesAfterSpeech += frameCount
                 let silentSeconds = Double(silentSamplesAfterSpeech) / targetSampleRate
                 let speechSeconds = bufferDuration - silentSeconds
-                if silentSeconds >= silenceTriggerSeconds, speechSeconds >= minSpeechSeconds {
+                if silentSeconds >= SettingsService.shared.dictationSilenceTriggerSeconds,
+                   speechSeconds >= minSpeechSeconds
+                {
                     shouldFlush = true
                 }
             }
