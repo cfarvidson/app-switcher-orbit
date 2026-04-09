@@ -106,6 +106,8 @@ final class SpeechRecognitionService: ObservableObject {
     private let injectionGracePeriod: CFTimeInterval = 0.25
 
     private var currentLocaleId: String = "en_US"
+    private var currentTask: DecodingTask = .transcribe
+    private var currentTranslationTargetId: String?
 
     private init() {}
 
@@ -127,7 +129,42 @@ final class SpeechRecognitionService: ObservableObject {
         }
     }
 
-    func start(localeId: String, onError: @escaping (String) -> Void = { _ in }) {
+    /// Start a regular (non-translating) dictation session in `localeId`.
+    /// Whisper transcribes audio in the same language and pastes the
+    /// transcript into the frontmost app.
+    func startDictation(localeId: String, onError: @escaping (String) -> Void = { _ in }) {
+        startInternal(
+            localeId: localeId,
+            task: .transcribe,
+            targetLocaleIdForDisplay: nil,
+            onError: onError
+        )
+    }
+
+    /// Start a translation session: Whisper takes audio in `sourceLocaleId`
+    /// and pastes English text into the frontmost app. The `targetLocaleId`
+    /// is purely cosmetic — it controls which `en_*` flag the recording
+    /// indicator displays. Whisper itself ignores it (its `.translate` task
+    /// always outputs English).
+    func startTranslation(
+        sourceLocaleId: String,
+        targetLocaleId: String,
+        onError: @escaping (String) -> Void = { _ in }
+    ) {
+        startInternal(
+            localeId: sourceLocaleId,
+            task: .translate,
+            targetLocaleIdForDisplay: targetLocaleId,
+            onError: onError
+        )
+    }
+
+    private func startInternal(
+        localeId: String,
+        task: DecodingTask,
+        targetLocaleIdForDisplay: String?,
+        onError: @escaping (String) -> Void
+    ) {
         let now = CACurrentMediaTime()
         if starting || (now - lastStartTime) < startLockout {
             NSLog("[Orbit.speech] start() suppressed (starting=\(starting), since-last=\(Int((now - lastStartTime) * 1000))ms)")
@@ -141,6 +178,8 @@ final class SpeechRecognitionService: ObservableObject {
         }
 
         currentLocaleId = localeId
+        currentTask = task
+        currentTranslationTargetId = targetLocaleIdForDisplay
 
         // Hard pre-flight: if the model isn't downloaded yet, refuse to
         // start and tell the user where to set it up. We never trigger
@@ -151,6 +190,8 @@ final class SpeechRecognitionService: ObservableObject {
         guard isModelDownloaded(modelName) else {
             NSLog("[Orbit.speech] start aborted — model \(modelName) not downloaded")
             starting = false
+            currentTask = .transcribe
+            currentTranslationTargetId = nil
             onError("Speech model not downloaded. Set it up in Settings → Dictation.")
             showSetupReminderNotification()
             return
@@ -289,14 +330,15 @@ final class SpeechRecognitionService: ObservableObject {
                 .replacingOccurrences(of: "_", with: "-")
                 .lowercased()
             let language = String(bcp47.split(separator: "-").first ?? "en")
-            NSLog("[Orbit.speech] stop: final flush \(String(format: "%.2f", Double(finalSnapshot.count) / targetSampleRate))s audio (\(language))")
+            let capturedTask = currentTask  // Snapshot before reset below races the async task.
+            NSLog("[Orbit.speech] stop: final flush \(String(format: "%.2f", Double(finalSnapshot.count) / targetSampleRate))s audio (\(language), task=\(capturedTask))")
             transcribing = true
             Task { [weak self] in
                 guard let self else { return }
                 do {
                     let options = DecodingOptions(
                         verbose: false,
-                        task: .transcribe,
+                        task: capturedTask,
                         language: language,
                         temperature: 0,
                         temperatureFallbackCount: 5,
@@ -325,6 +367,10 @@ final class SpeechRecognitionService: ObservableObject {
         } else {
             injectedSoFar = ""
         }
+        // Reset task state AFTER the final-flush block so capturedTask above
+        // reads the session's actual task, not the post-reset value.
+        currentTask = .transcribe
+        currentTranslationTargetId = nil
     }
 
     // MARK: - Model availability + download
@@ -587,7 +633,7 @@ final class SpeechRecognitionService: ObservableObject {
             do {
                 let options = DecodingOptions(
                     verbose: false,
-                    task: .transcribe,
+                    task: currentTask,
                     language: language,
                     temperature: 0,
                     // If a chunk decodes with low confidence at temperature
