@@ -324,6 +324,16 @@ final class SpeechRecognitionService: ObservableObject {
         // reset `injectedSoFar` until after the final flush has been
         // dispatched so multi-utterance sessions still get the leading
         // space treatment for the last chunk.
+        // The `!transcribing` clause: if a VAD-triggered flushAndTranscribe
+        // Task is already in flight (the user spoke, VAD fired, Whisper is
+        // mid-decode), we skip the final flush here. The original Task will
+        // still inject its transcript when it completes, so the audio that
+        // triggered VAD is NOT lost. What we discard is whatever fragment
+        // was captured between the VAD flush dispatch and this stop() —
+        // typically a few hundred ms of mid-utterance speech, which would
+        // produce broken text if transcribed in isolation. Trade-off: we
+        // accept losing that fragment in exchange for never producing
+        // garbled half-word output at session end.
         let minSamples = Int(targetSampleRate * minSpeechSeconds)
         if flushBuffer, hadSpeech, finalSnapshot.count > minSamples, let kit = whisperKit, !transcribing {
             let bcp47 = currentLocaleId
