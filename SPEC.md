@@ -26,9 +26,11 @@ Orbit/
 ├── Models/
 │   ├── RunningApp.swift        # Wraps NSRunningApplication
 │   ├── DictationLanguage.swift # Locale id + display name + flag emoji
-│   └── OrbitItem.swift         # Sum type: .app(RunningApp) | .language(DictationLanguage)
+│   ├── OrbitItem.swift         # Sum type: .app(RunningApp) | .language(DictationLanguage) | .translate(TranslatePair)
+│   └── TranslatePair.swift     # Source + target DictationLanguage for translate tile
 ├── Services/
 │   ├── AppService.swift             # Fetches running GUI apps
+│   ├── AudioInputDeviceService.swift # CoreAudio input device enumeration
 │   ├── HotkeyService.swift          # Carbon global hotkey + mouse button monitors
 │   ├── OverlayPanel.swift           # Floating transparent NSPanel
 │   ├── SettingsService.swift        # UserDefaults persistence (singleton)
@@ -41,6 +43,7 @@ Orbit/
 │   ├── OrbitView.swift         # SwiftUI radial layout with hover tracking
 │   ├── AppIconView.swift       # Single app icon with selection glow
 │   ├── LanguageTileView.swift  # Dictation language tile (flag emoji + locale badge)
+│   ├── TranslateTileView.swift # Translate tile (source flag → arrow → target flag)
 │   ├── SettingsView.swift      # Tabbed settings window
 │   └── ShortcutRecorderView.swift  # Keyboard shortcut capture
 └── Resources/
@@ -103,12 +106,25 @@ struct DictationLanguage: Identifiable, Equatable, Codable {
 enum OrbitItem: Identifiable, Equatable {
     case app(RunningApp)
     case language(DictationLanguage)
-    var id: String { /* "app:<pid>" or "lang:<locale>" */ }
-    var displayName: String { /* RunningApp.name or DictationLanguage.displayName */ }
+    case translate(TranslatePair)
+    var id: String { /* "app:<pid>", "lang:<locale>", or "translate:<sourceLocale>" */ }
+    var displayName: String { /* RunningApp.name, DictationLanguage.displayName, or "Swedish → English (US)" */ }
 }
 ```
 
-The ring consumes `[OrbitItem]` so apps and dictation languages can coexist. All ring mechanics (angle math, scroll-to-rotate, arrow navigation, sticky selection) operate on indices over `items`, independent of item type.
+The ring consumes `[OrbitItem]` so apps, dictation language tiles, and translate tiles can coexist. All ring mechanics (angle math, scroll-to-rotate, arrow navigation, sticky selection) operate on indices over `items`, independent of item type.
+
+## TranslatePair Model
+
+```swift
+struct TranslatePair: Identifiable, Equatable {
+    let source: DictationLanguage   // e.g. sv_SE — the language the user speaks into
+    let target: DictationLanguage   // the en_* variant displayed in the tile and indicator
+    var id: String { "translate:\(source.id)" }
+}
+```
+
+`target` is cosmetic: WhisperKit's `.translate` task always outputs English regardless of which `en_*` variant is stored here. The `id` is keyed only on `source.id` so the tile's anchor angle stays stable when the user changes their preferred English variant in System Settings (e.g. `en_US` → `en_GB`) — otherwise the angle-keyed slot would drift.
 
 ## AppService
 
@@ -199,29 +215,36 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 
 ### Stored Properties
 
-| Property             | Type                                   | Default                  | UserDefaults Key       |
-| -------------------- | -------------------------------------- | ------------------------ | ---------------------- |
-| triggerType          | `.keyboard` / `.mouseButton` / `.both` | `.keyboard`              | `triggerType`          |
-| inputMode            | `.mouse` / `.trackpad`                 | `.mouse`                 | `inputMode`            |
-| keyCode              | `UInt32`                               | `kVK_Space` (49)         | `keyCode`              |
-| modifiers            | `UInt32`                               | `optionKey` (2048)       | `modifiers`            |
-| keyDisplayName       | `String`                               | `"Space"`                | `keyDisplayName`       |
-| mouseButton          | `Int`                                  | `2` (middle)             | `mouseButton`          |
-| edgeActivation       | `Bool`                                 | `false`                  | `edgeActivation`       |
-| pinnedBundleIds      | `[String]`                             | `[]`                     | `pinnedBundleIds`      |
-| excludedBundleIds    | `Set<String>`                          | `[]`                     | `excludedBundleIds`    |
-| dictationEnabled     | `Bool`                                 | `false`                  | `dictationEnabled`     |
-| dictationLanguage1Id | `String?`                              | `nil`                    | `dictationLanguage1Id` |
-| dictationLanguage2Id | `String?`                              | `nil`                    | `dictationLanguage2Id` |
-| dictationModelName   | `String`                               | `"openai_whisper-small"` | `dictationModelName`   |
+| Property                | Type                                   | Default                  | UserDefaults Key          |
+| ----------------------- | -------------------------------------- | ------------------------ | ------------------------- |
+| triggerType             | `.keyboard` / `.mouseButton` / `.both` | `.keyboard`              | `triggerType`             |
+| inputMode               | `.mouse` / `.trackpad`                 | `.mouse`                 | `inputMode`               |
+| keyCode                 | `UInt32`                               | `kVK_Space` (49)         | `keyCode`                 |
+| modifiers               | `UInt32`                               | `optionKey` (2048)       | `modifiers`               |
+| keyDisplayName          | `String`                               | `"Space"`                | `keyDisplayName`          |
+| mouseButton             | `Int`                                  | `2` (middle)             | `mouseButton`             |
+| edgeActivation          | `Bool`                                 | `false`                  | `edgeActivation`          |
+| pinnedBundleIds         | `[String]`                             | `[]`                     | `pinnedBundleIds`         |
+| excludedBundleIds       | `Set<String>`                          | `[]`                     | `excludedBundleIds`       |
+| dictationEnabled        | `Bool`                                 | `false`                  | `dictationEnabled`        |
+| dictationLanguage1Id    | `String?`                              | `nil`                    | `dictationLanguage1Id`    |
+| dictationLanguage2Id    | `String?`                              | `nil`                    | `dictationLanguage2Id`    |
+| dictationModelName      | `String`                               | `"openai_whisper-small"` | `dictationModelName`      |
+| translateTileEnabled    | `Bool`                                 | `false`                  | `translateTileEnabled`    |
+| translateSourceLocaleId | `String`                               | `"sv_SE"`                | `translateSourceLocaleId` |
+| translateAngle          | `Double?`                              | `nil`                    | `translateAngle`          |
+| dictationInputDeviceUID | `String?`                              | `nil`                    | `dictationInputDeviceUID` |
 
 All properties are `@Published`. The `save()` method writes all properties to UserDefaults.
+
+`translateTileEnabled` defaults to `false` so existing users do not get a surprise tile after upgrading. `translateAngle` is assigned by `ensureAnchorAngles` when `translatePair` first becomes non-nil and is preserved when the tile is toggled off — re-enabling restores the same ring slot. `dictationInputDeviceUID` stores the CoreAudio `kAudioDevicePropertyDeviceUID` string (e.g. `"BuiltInMicrophoneDevice"`); `nil` means follow the system default input device.
 
 ### Computed Properties
 
 - `shortcutDisplayString` — builds a string like "⌥ Space" from modifier flags and key name, using Unicode symbols (⌃ ⌥ ⇧ ⌘)
 - `mouseButtonDisplayName` — human-readable name for the selected mouse button
 - `dictationLanguages: [DictationLanguage]` — resolved language tiles for the ring. Empty when `dictationEnabled` is false or no language ids are stored. Builds one `DictationLanguage` per non-nil id via `DictationLanguage.from(localeId:)`.
+- `translatePair: TranslatePair?` — returns a `TranslatePair` when `translateTileEnabled` is true, `translateSourceLocaleId` is present in `DictationService.enabledLocales()`, and at least one locale is enabled. The target is the first `en_*` entry in the enabled-locales list, falling back to a hardcoded `en_US` if no English locale is enabled. Returns `nil` if the configured source locale has been removed from System Settings.
 
 ## DictationService
 
@@ -246,11 +269,19 @@ Earlier versions tried two different paths to start macOS's built-in DictationIM
 - `enabledLocales() -> [DictationLanguage]` — reads `VisibleNetworkSRLocaleIdentifiers`, returns enabled entries, preserving `DictationIMPreferredLanguageIdentifiers` order.
 - `currentLanguage() -> String?` — reads `DictationIMNetworkBasedLocaleIdentifier`.
 - `setLanguage(_ localeId:)` — idempotent (no-op when the target already matches). Writes the active locale and reorders the preferred-language array. Performs a read-back verification after the write; mismatches are logged via `os.Logger`. Does **not** restart DictationIM — Orbit no longer depends on it.
-- `switchLanguageAndStart(_ localeId:)` — calls `setLanguage` then `SpeechRecognitionService.shared.start(localeId:)`.
+- `switchLanguageAndStart(_ localeId:)` — calls `setLanguage` then `SpeechRecognitionService.shared.startDictation(localeId:)`. (Internally renamed from `start(localeId:)` — behavior is unchanged.)
+- `startTranslation(pair:)` — starts a WhisperKit translate session via `SpeechRecognitionService.shared.startTranslation(sourceLocaleId:targetLocaleId:)`. Deliberately does **not** call `setLanguage`: macOS system Dictation cannot translate, so writing the source locale into `AppleSpeechRecognition.prefs` would misconfigure the user's physical dictation shortcut.
 
 ## SpeechRecognitionService
 
 `ObservableObject` singleton (`SpeechRecognitionService.shared`) that runs the entire dictation pipeline in-process. Replaces a previous `SFSpeechRecognizer` implementation, which had shallow language understanding outside English (bad punctuation, no auto-capitalization, no sentence-boundary modeling). WhisperKit handles all 99 Whisper languages with proper punctuation and casing.
+
+The public API exposes two entry points that delegate to a shared private implementation:
+
+- `startDictation(localeId:onError:)` — transcribes the audio in the given locale with `task: .transcribe`.
+- `startTranslation(sourceLocaleId:targetLocaleId:onError:)` — transcribes with `task: .translate`, which always outputs English regardless of source. `targetLocaleId` is used only for the indicator display; Whisper ignores it.
+
+Both delegate to `startInternal(localeId:task:targetLocaleIdForDisplay:onError:)`, which captures the chosen `DecodingTask` in private state (`currentTask: DecodingTask`, `currentTranslationTargetId: String?`). `flushAndTranscribe` and the final flush in `stop` both read `currentTask` rather than hardcoding `.transcribe`. Both fields are reset to their defaults (`.transcribe` / `nil`) at the **end** of `stop()`, after the final-flush dispatch, to avoid a race between the reset and the async transcription task completing.
 
 ### Pipeline
 
@@ -289,7 +320,7 @@ We deliberately do **not** transcribe on a fixed timer because Whisper re-decode
 
 ### Decoding options
 
-`DecodingOptions(verbose: false, task: .transcribe, language: <BCP-47 head>, temperature: 0, temperatureFallbackCount: 5, skipSpecialTokens: true, withoutTimestamps: true, noSpeechThreshold: 0.5)`. The locale id passed to `start(localeId:)` is converted to a hyphen-form BCP-47 root (e.g. `"en_US"` → `"en"`) for Whisper.
+`DecodingOptions(verbose: false, task: currentTask, language: <BCP-47 head>, temperature: 0, temperatureFallbackCount: 5, skipSpecialTokens: true, withoutTimestamps: true, noSpeechThreshold: 0.5)`. `currentTask` is `.transcribe` for normal dictation and `.translate` for translate sessions. The locale id passed to `startDictation`/`startTranslation` is converted to a hyphen-form BCP-47 root (e.g. `"en_US"` → `"en"`) for Whisper.
 
 ### Model lifecycle
 
@@ -305,7 +336,7 @@ We deliberately do **not** transcribe on a fixed timer because Whisper re-decode
 
 ### Error surfacing
 
-`start(localeId:onError:)` runs three pre-flight checks before capture begins. Each failure both reports the error via the `onError` callback and shows a user-visible NSAlert so the failure isn't silent:
+`startInternal(localeId:task:targetLocaleIdForDisplay:onError:)` runs three pre-flight checks before capture begins. Each failure both reports the error via the `onError` callback and shows a user-visible NSAlert so the failure isn't silent:
 
 | Failure                       | Alert                                                                                |
 | ----------------------------- | ------------------------------------------------------------------------------------ |
@@ -315,15 +346,42 @@ We deliberately do **not** transcribe on a fixed timer because Whisper re-decode
 
 ### Re-entrancy and lockout
 
-`start(localeId:)` is guarded by a 0.75 s `startLockout` and a `starting` re-entrancy flag so back-to-back triggers (e.g. a double-click) don't pile up sessions. If a session is already running, `stop(reason:)` is called first; the toggle handler in `AppDelegate.toggleOrbit` also calls `stop` when the user re-presses the global trigger while dictation is active.
+`startInternal` is guarded by a 0.75 s `startLockout` and a `starting` re-entrancy flag so back-to-back triggers (e.g. a double-click) don't pile up sessions. If a session is already running, `stop(reason:)` is called first; the toggle handler in `AppDelegate.toggleOrbit` also calls `stop` when the user re-presses the global trigger while dictation is active.
 
 ### Floating indicator
 
 `RecordingIndicatorPanel` is a borderless non-activating `NSPanel` shown near the cursor while a session is preparing or recording. Two states: `.loading(message)` while the model is being loaded, and `.listening` while audio capture is active. Click anywhere on the panel to stop the session.
 
+`show(localeId:state:onClick:)` accepts an optional `targetLocaleId: String?` parameter. When non-nil (translate sessions only), the indicator's flag region renders source flag → arrow → target flag instead of the single source flag, and the label reads e.g. "🇸🇪 → 🇺🇸 listening…". The `currentTranslationTargetId` captured at session start is passed here; `nil` for regular dictation sessions so the indicator is unchanged from its historical behavior.
+
 ### Notification
 
 `Notification.Name.orbitOpenSettings` is posted when the user clicks "Open Settings…" on the missing-model alert. `AppDelegate` listens for it and opens its Settings window.
+
+### Input device selection
+
+At the very top of `beginCapture`, before reading `inputNode.outputFormat`, the service checks `SettingsService.shared.dictationInputDeviceUID`. If non-nil, it resolves the UID to a live `AudioDeviceID` via `AudioInputDeviceService.audioDeviceID(forUID:)` and sets `kAudioOutputUnitProperty_CurrentDevice` on `audioEngine.inputNode.audioUnit` via `AudioUnitSetProperty`. Changing the device before installing the tap is required because the tap format is derived from the active device. If the stored UID does not resolve (device disconnected), the service logs a fallback line and proceeds with the system default — no alert, as unplugging a mic is a normal operating condition.
+
+## AudioInputDeviceService
+
+A stateless enum (`Orbit/Services/AudioInputDeviceService.swift`) that wraps CoreAudio device enumeration.
+
+```swift
+enum AudioInputDeviceService {
+    struct Device: Identifiable, Hashable {
+        let id: AudioDeviceID   // runtime handle; changes across reconnects
+        let uid: String         // kAudioDevicePropertyDeviceUID; stable across reconnects
+        let name: String        // human-readable, e.g. "Shure MV7"
+    }
+
+    static func listInputDevices() -> [Device]
+    static func audioDeviceID(forUID uid: String) -> AudioDeviceID?
+}
+```
+
+`listInputDevices` walks `kAudioHardwarePropertyDevices` on the system audio object, filters to devices that have at least one stream on `kAudioObjectPropertyScopeInput` (output-only devices like speakers are excluded), and reads `kAudioDevicePropertyDeviceUID` and `kAudioDevicePropertyDeviceNameCFString` for each survivor. Results are sorted alphabetically by name. The call is synchronous and takes under 1 ms on a typical Mac; no permissions are required because enumeration is distinct from microphone access.
+
+`audioDeviceID(forUID:)` performs the reverse lookup: given a stored UID, it returns the current `AudioDeviceID` for that device, or `nil` if no connected device has that UID.
 
 ## OrbitViewModel
 
@@ -350,13 +408,9 @@ Geometry is snapshotted once per show to avoid reading SettingsService on every 
 
 ### Ring Contents (show)
 
-On each `show()`, the ring is rebuilt as:
+On each `show()`, the ring is rebuilt from anchored items (language tiles, then the translate tile if present) followed by running apps. Anchored items are placed at their stored angles; apps fill the remaining angular space.
 
-```
-items = SettingsService.dictationLanguages.map(.language) + AppService.runningApps(...).map(.app)
-```
-
-Languages come first so their ring positions remain stable regardless of which apps are running (muscle memory). Languages only appear when `SettingsService.dictationEnabled == true` and at least one language id is stored.
+Language tiles come first (when `dictationEnabled` and at least one language is configured). After the language anchor loop, if `settings.translatePair` is non-nil and `settings.translateAngle` is set, a `.translate(pair)` entry is appended at that angle. Running apps follow, with pinned apps at the front of the app section. `SettingsService.ensureAnchorAngles(for:)` is called at the start of `show()` and assigns `translateAngle` if it is nil and a translate pair now exists.
 
 ### Angle & Position Math
 
@@ -411,7 +465,8 @@ All monitors are removed on dismiss.
 - After a 50ms delay, branches on the selected `OrbitItem`:
   - `.app(let app)` — calls `app.app.activate()` on the `NSRunningApplication`
   - `.language(let language)` — calls `DictationService.switchLanguageAndStart(language.id)`
-- The delay ensures the overlay is fully hidden before activation or language switch
+  - `.translate(let pair)` — calls `DictationService.startTranslation(pair: pair)`
+- The delay ensures the overlay is fully hidden before activation or dictation/translation start
 
 ## OrbitView (SwiftUI)
 
@@ -421,7 +476,7 @@ Layered inside a `ZStack`, only rendered when `viewModel.isVisible`:
 2. **Ring guide** — `Circle` stroke, white at 10% opacity, 1pt line, diameter = `radius × 2`
 3. **Center dot** — 6pt white circle at 40% opacity
 4. **Selection line** — dashed `Path` from center to selected app's position, accent color at 40% opacity, dash pattern `[4, 4]`
-5. **Ring items** — `ForEach` over enumerated `viewModel.items`, switching on `OrbitItem` to render either an `AppIconView` (for `.app`) or a `LanguageTileView` (for `.language`). Each is positioned via `.position()`; tap triggers `selectAndSwitch()`.
+5. **Ring items** — `ForEach` over enumerated `viewModel.items`, switching on `OrbitItem` to render an `AppIconView` (for `.app`), a `LanguageTileView` (for `.language`), or a `TranslateTileView` (for `.translate`). Each is positioned via `.position()`; tap triggers `selectAndSwitch()`.
 6. **Item label** — shown when an item is selected, centered below the middle in a capsule with `.ultraThinMaterial`. Reads `viewModel.items[index].displayName` so it works for both apps and languages.
 
 ### Interactions
@@ -450,6 +505,17 @@ Displays a dictation-language tile. Visually mirrors `AppIconView` so both item 
 - Flag emoji centered as a `Text` at `size * 0.7`
 - Small bottom-right badge with the uppercased language subtag (e.g. `"EN"`, `"SV"`) in a black capsule — secondary signifier so flags aren't the only cue
 - Same selection treatment as `AppIconView`: accent glow + stroke + `scaleEffect(1.25)`
+- Animation: `.easeInOut(0.12)` on `isSelected`
+
+## TranslateTileView
+
+Displays a translate tile alongside language tiles in the ring. Visual treatment matches `LanguageTileView` so both tile types share the same affordances.
+
+- `RoundedRectangle(cornerRadius: 12)` filled with `.ultraThinMaterial`
+- `HStack` centered in the tile: source flag emoji → `Image(systemName: "arrow.right")` → target flag emoji
+- Font sizes use multipliers of the effective tile size: source/target flags at `0.42×`, arrow icon at `0.22×` with `.semibold` weight, `HStack` spacing at `0.06×`
+- No locale badge — two flags carry the meaning without one
+- Same selection treatment as `AppIconView` and `LanguageTileView`: accent color glow shadow + stroke + `scaleEffect(1.25)`; anchored tiles get a `1.2×` size boost (`effectiveSize = isAnchored ? size * 1.2 : size`)
 - Animation: `.easeInOut(0.12)` on `isSelected`
 
 ## SettingsView
@@ -501,6 +567,18 @@ A `TabView` with four tabs:
   - Current dictation language row — shows `DictationService.currentLanguage()` or `—`.
   - Explainer caption that recognition runs entirely on-device via WhisperKit, that macOS will prompt for microphone permission on first use, and how to stop a session (indicator click or ESC).
   - "Microphone Privacy…" button that opens `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`.
+- **Microphone section** (always visible, outside the `if dictationEnabled` block):
+  - Picker bound to `settings.dictationInputDeviceUID` (`String?`). First option is "System Default" tagged `nil`; remaining options come from `AudioInputDeviceService.listInputDevices()`, each tagged with `Optional(device.uid)` so the stable UID is persisted rather than the transient `AudioDeviceID`.
+  - If the stored UID is not in the enumerated list (device disconnected), the picker shows an extra "⚠︎ Not connected (UID)" option so the user is not confused by an apparent silent reset. Selecting "System Default" writes `nil` and clears the warning.
+  - "Refresh list" button re-enumerates devices and updates `availableInputDevices` state.
+  - Caption explains that this device is used for all dictation and translation, and that "System Default" follows the macOS audio input setting.
+  - Visible regardless of `dictationEnabled` or `translateTileEnabled` so the user can pre-configure their mic before enabling either feature.
+- **Translation section** (always visible, outside the `if dictationEnabled` block):
+  - Toggle "Show translate-to-English tile in Orbit ring" bound to `settings.translateTileEnabled`.
+  - Source language picker populated from `DictationService.enabledLocales()` filtered to non-English locales (`!id.hasPrefix("en")`), bound to `settings.translateSourceLocaleId`. Disabled when the toggle is off.
+  - When the filtered list is empty, the picker is replaced by an inline warning ("Enable a non-English dictation language in System Settings → Keyboard → Dictation first.") and an "Open Dictation Settings…" button.
+  - Caption explains that Orbit speaks in the selected language and transcribes/translates to English using Whisper.
+  - Toggling on triggers `SettingsService.ensureAnchorAngles(for:)` so the tile gets an angle on the next ring open.
 - Uses `.formStyle(.grouped)`. Enabled locales are loaded via `refreshDictationLocales()` in `onAppear`. The view holds an `@ObservedObject var speech = SpeechRecognitionService.shared` so model status updates re-render the status row live.
 
 ### AppInfo Helper
