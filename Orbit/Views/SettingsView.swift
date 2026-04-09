@@ -9,37 +9,49 @@ struct WhisperModelOption: Identifiable {
     let id: String
     let label: String
     let description: String
+    /// Whether this model supports `task: .translate`. OpenAI's Turbo
+    /// variant (large-v3-turbo, dated v20240930) is fine-tuned for
+    /// transcription only and silently ignores translation requests,
+    /// so the translate tile produces source-language output if Turbo
+    /// is selected. All other models in the catalog support translation.
+    let supportsTranslation: Bool
 
     static let all: [WhisperModelOption] = [
         WhisperModelOption(
             id: "openai_whisper-tiny",
             label: "Tiny (~75 MB)",
-            description: "Fastest, lowest quality. Good for testing or very limited disk."
+            description: "Fastest, lowest quality. Good for testing or very limited disk.",
+            supportsTranslation: true
         ),
         WhisperModelOption(
             id: "openai_whisper-base",
             label: "Base (~150 MB)",
-            description: "Balanced. Decent quality, fast cold-start."
+            description: "Balanced. Decent quality, fast cold-start.",
+            supportsTranslation: true
         ),
         WhisperModelOption(
             id: "openai_whisper-small",
             label: "Small (~500 MB) — recommended",
-            description: "Strong sweet spot for dictation. Good multilingual quality, real-time on Apple Silicon."
+            description: "Strong sweet spot for dictation. Good multilingual quality, real-time on Apple Silicon.",
+            supportsTranslation: true
         ),
         WhisperModelOption(
             id: "openai_whisper-medium",
             label: "Medium (~1.5 GB)",
-            description: "High quality. Slower cold-start, more RAM. Best for difficult audio."
+            description: "High quality. Slower cold-start, more RAM. Best for difficult audio.",
+            supportsTranslation: true
         ),
         WhisperModelOption(
             id: "openai_whisper-large-v3-v20240930",
             label: "Large v3 Turbo (~1.5 GB)",
-            description: "Apple's Whisper Turbo (Sep 2024) — large-v3 quality at small-like speed. Best multilingual quality available."
+            description: "Apple's Whisper Turbo (Sep 2024) — large-v3 transcription quality at small-like speed. Transcription only — does NOT support the translate tile (Whisper's Turbo distillation removed translation). Use Large v3 if you need translation.",
+            supportsTranslation: false
         ),
         WhisperModelOption(
             id: "openai_whisper-large-v3",
             label: "Large v3 (~2.9 GB)",
-            description: "Full Whisper Large v3. Highest quality, but slower and more RAM than Turbo."
+            description: "Full Whisper Large v3. Highest quality, but slower and more RAM than Turbo. Required if you need the translate tile (Turbo cannot translate).",
+            supportsTranslation: true
         ),
     ]
 }
@@ -407,6 +419,23 @@ struct SettingsView: View {
                             settings.ensureAnchorAngles(for: settings.dictationLanguages)
                         }
                     }
+
+                if let currentModel = WhisperModelOption.all.first(where: { $0.id == settings.dictationModelName }),
+                   !currentModel.supportsTranslation
+                {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(currentModel.label) does not support translation.")
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                            Text("The translate tile will produce source-language text instead of English. Switch to Large v3 or a smaller multilingual model in the Speech model section above.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
 
                 if translateSourceCandidates.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
