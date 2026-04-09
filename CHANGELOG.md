@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.1.0
+
+### New Features
+
+- **Translate-to-English dictation tile** — A new tile in the Orbit ring that takes audio in a configurable source language (default Swedish) and pastes English text into the frontmost app. The tile renders two flags side-by-side (🇸🇪 → 🇬🇧) so the translation direction is unmistakable. Powered by WhisperKit's built-in `.translate` task — audio stays on-device. Configure the source language in Settings → Dictation → Translation. Target flag follows whichever `en_*` variant you have enabled in System Settings.
+- **Microphone input device picker** — New control in Settings → Dictation → Microphone that lets you pin Whisper to a specific input device independent of the macOS system default. Solves the common "I plugged in a USB mic but Whisper keeps using the built-in" paper cut. Powered by a small CoreAudio wrapper (`AudioInputDeviceService`) that enumerates input devices by persistent UID. Silent fallback to the system default if the stored device is disconnected.
+- **Pause tolerance slider** — Settings → Dictation → Microphone now has a "Pause tolerance" slider (0.5–3.0s, default 0.8s). Slow speakers who pause mid-sentence can dial this up so their natural rhythm doesn't fragment the transcript.
+
+### Improvements
+
+- **Pre-roll audio capture** — The audio engine now starts the moment the Orbit ring opens, filling a 2-second circular buffer. When you click a dictation or translate tile, that buffer is promoted into the session — so the first phoneme you speak when clicking is never lost to engine startup latency. Trade-off: the macOS mic privacy LED lights for the duration the ring is visible. This is the visible cost of not dropping words at click time.
+- **`.starting` indicator state** — The recording indicator used to say "Listening…" immediately after `AVAudioEngine.start()` returned, but the engine took another ~100–300 ms to actually deliver audio. The indicator now shows "Starting…" until the first real audio buffer arrives, then flips to "Listening…". Combined with pre-roll, no more dropped opening words.
+- **Whisper ellipsis stripping** — Whisper inserts "…" mid-sentence whenever it detects a pause (interpreted as trailing-off speech). For dictation this polluted natural speech with ellipsis the user didn't intend. Both ASCII "..." and Unicode "…" forms are now stripped from transcripts before injection.
+- **Turbo translation warning** — OpenAI's Whisper Large v3 Turbo is fine-tuned for transcription only and silently ignores `task: .translate`. Settings now shows an orange warning in the Translation section when Turbo is the selected model, explaining the limitation and pointing at Large v3 as the alternative.
+- **Dual-flag recording indicator** — During a translate session, the floating indicator renders both flags (🇸🇪 → 🇬🇧) instead of the regular "single flag + locale badge" layout used for same-language dictation. Makes it obvious mid-session that translation is active.
+
+### Technical details
+
+- `SpeechRecognitionService` split its single `start(localeId:)` method into `startDictation(localeId:)` and `startTranslation(sourceLocaleId:targetLocaleId:)` delegating to a private `startInternal(localeId:task:targetLocaleIdForDisplay:)` that threads the WhisperKit `DecodingTask` through the existing transcription pipeline.
+- `DictationService.startTranslation(pair:)` deliberately does NOT write the macOS Dictation plist prefs, because system Dictation cannot translate — touching those prefs would misconfigure the user's physical dictation shortcut.
+- New `OrbitItem.translate(TranslatePair)` case + new `TranslateTileView` with the same visual treatment as language tiles but with a 3-way flag-arrow-flag layout.
+- `translateAngle` is preserved across enable/disable cycles of the translate toggle, so the ring slot is restored when you re-enable.
+
 ## 1.0.13
 
 ### Improvements
