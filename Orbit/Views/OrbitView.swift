@@ -60,6 +60,13 @@ struct OrbitView: View {
                                 size: viewModel.iconSize,
                                 isAnchored: positioned.isAnchored
                             )
+                        case .translate(let pair):
+                            TranslateTileView(
+                                pair: pair,
+                                isSelected: isSelected,
+                                size: viewModel.iconSize,
+                                isAnchored: positioned.isAnchored
+                            )
                         }
                     }
                     .position(position)
