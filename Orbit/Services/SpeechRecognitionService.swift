@@ -737,9 +737,21 @@ final class SpeechRecognitionService: ObservableObject {
         let lower = trimmed.lowercased()
         if SpeechRecognitionService.boilerplateBlocklist.contains(lower) { return }
 
+        // Strip ellipsis. Whisper inserts "..." or "…" whenever the speaker
+        // pauses mid-sentence (interpreted as trailing-off). For dictation
+        // this just pollutes natural speech with ellipsis the user didn't
+        // intend. We strip both the ASCII three-dot form and the Unicode
+        // single-glyph form, then collapse any resulting double-spaces.
+        let cleaned = trimmed
+            .replacingOccurrences(of: "...", with: "")
+            .replacingOccurrences(of: "\u{2026}", with: "")
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+
         // Add a leading space if we've already typed an utterance in this
         // session, so consecutive utterances are separated by a space.
-        let toInject = injectedSoFar.isEmpty ? trimmed : " " + trimmed
+        let toInject = injectedSoFar.isEmpty ? cleaned : " " + cleaned
         injectText(toInject)
         injectedSoFar += toInject
     }
