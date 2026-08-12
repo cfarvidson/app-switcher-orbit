@@ -25,8 +25,10 @@ import os
 ///      pauses (see the VAD section below).
 ///   3. When the resulting transcript extends what we've already injected,
 ///      we type the new portion via `CGEvent.keyboardSetUnicodeString`.
-///   4. ESC or any other physical keypress stops the session. Click on the
-///      indicator stops it. Re-triggering Orbit stops it.
+///   4. ESC cancels the session (discarding the buffer). Re-triggering Orbit
+///      stops it and commits. "Stop Dictation" in the menu bar stops it and
+///      commits. Session state is published as `dictationState` and rendered
+///      by `StatusItemController` in the menu bar.
 ///
 /// Lazy model load: FluidAudio downloads the Parakeet CoreML model bundle on
 /// first use. There is only one supported model.
@@ -122,7 +124,6 @@ final class SpeechRecognitionService: ObservableObject {
     private var hardCapWorkItem: DispatchWorkItem?
     private var injectedSoFar: String = ""
     private(set) var isRunning: Bool = false
-    private var indicatorPanel: RecordingIndicatorPanel?
 
     private var starting: Bool = false
     private var lastStartTime: CFTimeInterval = 0
@@ -305,19 +306,7 @@ final class SpeechRecognitionService: ObservableObject {
             return
         }
 
-        // Replace any existing indicator so we anchor near the user's
-        // current cursor.
-        if indicatorPanel != nil {
-            indicatorPanel?.hideIndicator()
-            indicatorPanel = nil
-        }
-
-        // Show the indicator immediately so the user gets feedback. The
-        // model is downloaded but might still be loading into RAM.
-        let initialState: RecordingIndicatorPanel.State =
-            (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .listening
         dictationState = (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .listening
-        showIndicator(state: initialState)
 
         ensurePermissions { [weak self] granted in
             guard let self else { return }
@@ -325,8 +314,6 @@ final class SpeechRecognitionService: ObservableObject {
                 NSLog("[Orbit.speech] permission denied")
                 self.starting = false
                 DispatchQueue.main.async {
-                    self.indicatorPanel?.hideIndicator()
-                    self.indicatorPanel = nil
                     self.dictationState = .idle
                     onError("Microphone permission denied")
                     self.showMicPermissionAlert()
@@ -339,7 +326,6 @@ final class SpeechRecognitionService: ObservableObject {
                     if self.warmupActive {
                         self.promoteWarmupToSession()
                     } else {
-                        self.indicatorPanel?.updateState(.starting)
                         self.dictationState = .starting
                         self.beginCapture(onError: onError)
                     }
@@ -393,9 +379,9 @@ final class SpeechRecognitionService: ObservableObject {
     ///     audio buffer is transcribed and injected as a final utterance
     ///     before tearing down. When `false`, the buffer is discarded —
     ///     used by ESC because the macOS Dictation convention is "ESC
-    ///     cancels". The hotkey re-trigger and the indicator click both
-    ///     commit (flushBuffer=true) because pressing those means "I'm
-    ///     done", not "throw it away".
+    ///     cancels". The hotkey re-trigger and the menu bar "Stop Dictation"
+    ///     command both commit (flushBuffer=true) because using those means
+    ///     "I'm done", not "throw it away".
     func stop(reason: String = "explicit", flushBuffer: Bool = true) {
         hardCapWorkItem?.cancel()
         hardCapWorkItem = nil
@@ -426,9 +412,6 @@ final class SpeechRecognitionService: ObservableObject {
             escMonitor = nil
         }
 
-        indicatorPanel?.hideIndicator()
-        indicatorPanel = nil
-
         hasSpeechInBuffer = false
         silentSamplesAfterSpeech = 0
         hasReceivedFirstAudioBuffer = false
@@ -437,8 +420,8 @@ final class SpeechRecognitionService: ObservableObject {
         isRunning = false
 
         // Final flush. Runs async — by the time the transcript lands,
-        // the indicator is already hidden and the user has presumably
-        // refocused their target text field. We deliberately do NOT
+        // the menu bar has already returned to idle and the user has
+        // presumably refocused their target text field. We deliberately do NOT
         // reset `injectedSoFar` until after the final flush has been
         // dispatched so multi-utterance sessions still get the leading
         // space treatment for the last chunk.
@@ -539,8 +522,6 @@ final class SpeechRecognitionService: ObservableObject {
         await downloadAndLoadModel()
         if asrManager == nil {
             onError("Failed to load the Parakeet model. Set up dictation in Settings → Dictation.")
-            indicatorPanel?.hideIndicator()
-            indicatorPanel = nil
             dictationState = .idle
         }
     }
@@ -585,7 +566,6 @@ final class SpeechRecognitionService: ObservableObject {
         isRunning = true
         // The engine has been delivering buffers since warmup; flip indicator
         // straight to .listening (skip the .starting state, no startup gap).
-        indicatorPanel?.updateState(.listening)
         dictationState = .listening
         NSLog("[Orbit.speech] promoted warmup to session, preroll=\(audioBuffer.count) samples")
     }
@@ -653,8 +633,6 @@ final class SpeechRecognitionService: ObservableObject {
         } catch {
             NSLog("[Orbit.speech] audio engine failed to start: \(error)")
             onError("Audio engine failed to start: \(error.localizedDescription)")
-            indicatorPanel?.hideIndicator()
-            indicatorPanel = nil
             dictationState = .idle
             return
         }
@@ -752,7 +730,6 @@ final class SpeechRecognitionService: ObservableObject {
 
         if shouldFlipToListening {
             DispatchQueue.main.async { [weak self] in
-                self?.indicatorPanel?.updateState(.listening)
                 self?.dictationState = .listening
             }
         }
@@ -931,8 +908,8 @@ final class SpeechRecognitionService: ObservableObject {
         // legitimate dictation sessions whenever any incidental keystroke
         // arrived between audio capture and the model finishing
         // transcription (~600ms latency). Users who want to switch from
-        // dictation to typing should press ESC, click the indicator, or
-        // re-trigger Orbit.
+        // dictation to typing should press ESC, use "Stop Dictation" in the
+        // menu bar, or re-trigger Orbit.
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return }
             if event.keyCode != 53 { return }  // kVK_Escape
@@ -950,15 +927,6 @@ final class SpeechRecognitionService: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: work)
     }
 
-    // MARK: - Indicator
-
-    private func showIndicator(state: RecordingIndicatorPanel.State) {
-        let panel = RecordingIndicatorPanel()
-        panel.show(state: state) { [weak self] in
-            DispatchQueue.main.async { self?.stop(reason: "indicator click") }
-        }
-        indicatorPanel = panel
-    }
 }
 
 extension Notification.Name {

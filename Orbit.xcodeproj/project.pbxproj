@@ -28,7 +28,6 @@
 		D7FDA8AC9981F577AF880764 /* LayoutPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F52A45A2D15CB617E0E7BF7 /* LayoutPreviewView.swift */; };
 		DF39D33FF39D1EBBEC47E523 /* RingLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F284CDE33E08C0AF7D7319 /* RingLayout.swift */; };
 		F204E258AC938FD314360C36 /* SettingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */; };
-		F505F3499DB37B479F12C584 /* RecordingIndicatorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B1A8EA92966D1BCAC801CC /* RecordingIndicatorPanel.swift */; };
 		FE1F71420B0761A4E62AA824 /* OrbitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26EB023126B42D85C78E726C /* OrbitApp.swift */; };
 /* End PBXBuildFile section */
 
@@ -55,7 +54,6 @@
 		CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorderView.swift; sourceTree = "<group>"; };
 		E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		E691E1A576C579A627A7BDDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		F3B1A8EA92966D1BCAC801CC /* RecordingIndicatorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingIndicatorPanel.swift; sourceTree = "<group>"; };
 		FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -119,7 +117,6 @@
 				55310747335F2AE5F09BFEDC /* DictationTileView.swift */,
 				5F52A45A2D15CB617E0E7BF7 /* LayoutPreviewView.swift */,
 				15B0E64515D2F209A1ACF98A /* OrbitView.swift */,
-				F3B1A8EA92966D1BCAC801CC /* RecordingIndicatorPanel.swift */,
 				4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */,
 				CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */,
 			);
@@ -241,7 +238,6 @@
 				A5911D106F4DE7F9469D7464 /* OrbitView.swift in Sources */,
 				0A629DD297BCDCB3D84FD808 /* OrbitViewModel.swift in Sources */,
 				34C80F3712FAF719C2C3D455 /* OverlayPanel.swift in Sources */,
-				F505F3499DB37B479F12C584 /* RecordingIndicatorPanel.swift in Sources */,
 				DF39D33FF39D1EBBEC47E523 /* RingLayout.swift in Sources */,
 				76061C98C618303FC707F143 /* RunningApp.swift in Sources */,
 				F204E258AC938FD314360C36 /* SettingsService.swift in Sources */,

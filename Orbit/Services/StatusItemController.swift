@@ -17,6 +17,9 @@ final class StatusItemController: NSObject {
     private var activationMenuItem: NSMenuItem?
     private var inputModeMenuItem: NSMenuItem?
     private var updateMenuItem: NSMenuItem?
+    private var dictationStatusItem: NSMenuItem?
+    private var stopDictationItem: NSMenuItem?
+    private var dictationSeparatorItem: NSMenuItem?
 
     private var breatheTimer: Timer?
     private var breathePhase: Double = 0
@@ -148,6 +151,54 @@ final class StatusItemController: NSObject {
         } else {
             stopBreathing(resetTo: style.alpha)
         }
+
+        updateDictationMenuItems(for: state)
+    }
+
+    /// Inserts a disabled status line plus a "Stop Dictation" command at the
+    /// top of the menu while a session is live, and removes both when it ends.
+    /// This is the visible replacement for the old click-to-stop panel, and the
+    /// only place the `.loading` message is still shown.
+    private func updateDictationMenuItems(for state: SpeechRecognitionService.DictationState) {
+        guard let menu = statusItem.menu else { return }
+
+        // Tear down whatever is currently installed, separator included.
+        for item in [stopDictationItem, dictationStatusItem].compactMap({ $0 }) {
+            let index = menu.index(of: item)
+            if index >= 0 { menu.removeItem(at: index) }
+        }
+        if let separator = dictationSeparatorItem, menu.index(of: separator) >= 0 {
+            menu.removeItem(separator)
+        }
+        dictationStatusItem = nil
+        stopDictationItem = nil
+        dictationSeparatorItem = nil
+
+        let statusText: String
+        switch state {
+        case .idle: return
+        case .loading(let message): statusText = message
+        case .starting: statusText = "Starting\u{2026}"
+        case .listening: statusText = "Listening\u{2026}"
+        case .transcribing: statusText = "Transcribing\u{2026}"
+        }
+
+        let status = NSMenuItem(title: statusText, action: nil, keyEquivalent: "")
+        status.isEnabled = false
+        let stop = NSMenuItem(title: "Stop Dictation", action: #selector(stopDictation), keyEquivalent: "")
+        stop.target = self
+        let separator = NSMenuItem.separator()
+
+        menu.insertItem(status, at: 0)
+        menu.insertItem(stop, at: 1)
+        menu.insertItem(separator, at: 2)
+        dictationStatusItem = status
+        stopDictationItem = stop
+        dictationSeparatorItem = separator
+    }
+
+    @objc private func stopDictation() {
+        SpeechRecognitionService.shared.stop(reason: "menu bar stop")
     }
 
     // MARK: - Breathe animation
