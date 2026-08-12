@@ -25,8 +25,9 @@ import os
 ///      pauses (see the VAD section below).
 ///   3. When the resulting transcript extends what we've already injected,
 ///      we type the new portion via `CGEvent.keyboardSetUnicodeString`.
-///   4. ESC cancels the session (discarding the buffer). Re-triggering Orbit
-///      stops it and commits. "Stop Dictation" in the menu bar stops it and
+///   4. ESC cancels the session (discarding the buffer) and is swallowed so
+///      it never reaches the app being typed into. Re-triggering Orbit stops
+///      it and commits. "Stop Dictation" in the menu bar stops it and
 ///      commits. Session state is published as `dictationState` and rendered
 ///      by `StatusItemController` in the menu bar.
 ///
@@ -120,6 +121,9 @@ final class SpeechRecognitionService: ObservableObject {
 
     // MARK: - Stop / interaction
 
+    private var escTap: EscapeKeyTap?
+    /// Observe-only fallback, used only when the `CGEvent` tap cannot be
+    /// created. Escape still cancels, but also reaches the frontmost app.
     private var escMonitor: Any?
     private var hardCapWorkItem: DispatchWorkItem?
     private var injectedSoFar: String = ""
@@ -407,6 +411,8 @@ final class SpeechRecognitionService: ObservableObject {
         }
         audioEngine.inputNode.removeTap(onBus: 0)
 
+        escTap?.stop()
+        escTap = nil
         if let monitor = escMonitor {
             NSEvent.removeMonitor(monitor)
             escMonitor = nil
@@ -904,17 +910,29 @@ final class SpeechRecognitionService: ObservableObject {
     // MARK: - Stop triggers
 
     private func installEscMonitor() {
-        // ESC-only stop. The "stop on any keypress" variant was killing
-        // legitimate dictation sessions whenever any incidental keystroke
-        // arrived between audio capture and the model finishing
-        // transcription (~600ms latency). Users who want to switch from
-        // dictation to typing should press ESC, use "Stop Dictation" in the
-        // menu bar, or re-trigger Orbit.
+        // ESC = cancel (matches macOS Dictation). Discards the audio buffer
+        // instead of transcribing it.
+        //
+        // The tap swallows the key so it never reaches the app the user is
+        // typing into. Without that, cancelling dictation inside a dialog or a
+        // modal editor would also dismiss it.
+        //
+        // "Stop on any keypress" was tried and reverted: it killed legitimate
+        // sessions whenever an incidental keystroke arrived between audio
+        // capture and the model finishing transcription (~600ms). Users who
+        // want to switch from dictation to typing should press ESC, use
+        // "Stop Dictation" in the menu bar, or re-trigger Orbit.
+        let tap = EscapeKeyTap { [weak self] in
+            self?.stop(reason: "esc", flushBuffer: false)
+        }
+        if tap.start() {
+            escTap = tap
+            return
+        }
+
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return }
             if event.keyCode != 53 { return }  // kVK_Escape
-            // ESC = cancel (matches macOS Dictation). Discards the audio
-            // buffer instead of transcribing it.
             DispatchQueue.main.async { self.stop(reason: "esc", flushBuffer: false) }
         }
     }

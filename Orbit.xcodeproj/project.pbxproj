@@ -11,6 +11,7 @@
 		0F2835DDB7523577F8219883 /* AudioInputDeviceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98405B8A69B5B1BA8DC75082 /* AudioInputDeviceService.swift */; };
 		2269A96732CB42EA5C5DD105 /* AppIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4958B2634D8439242ED1028F /* AppIconView.swift */; };
 		2A49C7AB49AF925F710395B7 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */; };
+		2B99F71FE4018A4F90193B71 /* EscapeKeyTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0A9AEA7188B85774E22690 /* EscapeKeyTap.swift */; };
 		34C80F3712FAF719C2C3D455 /* OverlayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */; };
 		4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE9434D67F596027017522B /* AppService.swift */; };
 		593F29D951061FC9A2C89ADE /* SpeechRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BF5FF75E2668C683B3F6460 /* SpeechRecognitionService.swift */; };
@@ -36,6 +37,7 @@
 		26EB023126B42D85C78E726C /* OrbitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApp.swift; sourceTree = "<group>"; };
 		3785CD7C0BD802AE20E35888 /* RunningApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunningApp.swift; sourceTree = "<group>"; };
 		4958B2634D8439242ED1028F /* AppIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconView.swift; sourceTree = "<group>"; };
+		4D0A9AEA7188B85774E22690 /* EscapeKeyTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscapeKeyTap.swift; sourceTree = "<group>"; };
 		4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		55310747335F2AE5F09BFEDC /* DictationTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationTileView.swift; sourceTree = "<group>"; };
 		5BF5FF75E2668C683B3F6460 /* SpeechRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognitionService.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 			children = (
 				CBE9434D67F596027017522B /* AppService.swift */,
 				98405B8A69B5B1BA8DC75082 /* AudioInputDeviceService.swift */,
+				4D0A9AEA7188B85774E22690 /* EscapeKeyTap.swift */,
 				FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */,
 				BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */,
 				A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */,
@@ -231,6 +234,7 @@
 				4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */,
 				0F2835DDB7523577F8219883 /* AudioInputDeviceService.swift in Sources */,
 				A329264775F189B4E845781A /* DictationTileView.swift in Sources */,
+				2B99F71FE4018A4F90193B71 /* EscapeKeyTap.swift in Sources */,
 				2A49C7AB49AF925F710395B7 /* HotkeyService.swift in Sources */,
 				D7FDA8AC9981F577AF880764 /* LayoutPreviewView.swift in Sources */,
 				FE1F71420B0761A4E62AA824 /* OrbitApp.swift in Sources */,
