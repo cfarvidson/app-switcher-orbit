@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0
+
+### Fixed
+
+- New ring anchors are no longer placed on top of an existing one. When two anchors shared a stored angle, the gap scan in `RingLayout.nextAnchorAngle` read that zero-width gap as a full circle and returned its midpoint, which landed on an occupied angle. `RingLayout.compute` has no duplicate handling, so the two tiles rendered on the same point and the later one took the click. In practice: the new dictation tile could end up under a pinned app, showing that app's icon and launching it instead of starting dictation.
+
+### Note
+
+- 2.0.0 was never released. Its changes ship here.
+
 ## 2.0.0
 
 ### Changed
