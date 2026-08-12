@@ -1,277 +1,263 @@
 import AppKit
 import SwiftUI
 
-/// Circular preview for positioning anchored items (pinned apps + the
-/// dictation tile). The user drags each icon around a scaled-down ring and
-/// the angle snaps to 15° increments on release. Writes back through
-/// `SettingsService` so the layout persists.
+/// Live preview of the resolved ring. Pinned apps and the dictation tile are
+/// draggable and set a preferred direction; every non-pinned running app is
+/// drawn dimmed and smaller so the user can see what the ring will actually
+/// look like rather than an abstract set of anchors.
+///
+/// This view calls the same `RingLayout.compute` the real ring uses, so the
+/// preview cannot drift from the thing it is previewing.
 struct LayoutPreviewView: View {
     @ObservedObject var settings = SettingsService.shared
-    @State private var anchors: [Anchor] = []
+    @State private var runningApps: [RunningApp] = []
     @State private var draggingId: String?
     @State private var dragAngle: Double = 0
 
     private let diameter: CGFloat = 280
-    private let iconSize: CGFloat = 44
-    private let snapIncrement: Double = 15
-    private let collisionThreshold: Double = 5
+    private let anchorIconSize: CGFloat = 44
+    private let otherIconSize: CGFloat = 26
 
-    /// In-memory snapshot of an anchored item's current state. Each anchor
-    /// carries both its persisted angle and an `id` that tells us which
-    /// `SettingsService` dictionary to write back to.
-    private struct Anchor: Identifiable, Equatable {
-        enum Kind: Equatable { case pinnedApp, dictation }
-        let id: String
-        let kind: Kind
-        var angleDegrees: Double
-        let displayName: String
-        let icon: AnchorIcon
-
-        enum AnchorIcon: Equatable {
-            case app(NSImage)
-            case dictation
-        }
-    }
+    private var ringRadius: CGFloat { (diameter - 40) / 2 }
+    private var center: CGPoint { CGPoint(x: diameter / 2, y: diameter / 2) }
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Drag icons around the ring to position them. Non-pinned running apps fill the gaps automatically in Orbit.")
+            Text("Drag a pinned app to roughly where you want it. Orbit keeps every app evenly spaced and gives each pinned app the free slot closest to your direction.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
             ZStack {
-                // Guide circle at the ring radius
                 Circle()
-                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                    .frame(width: diameter - 40, height: diameter - 40)
+                    .stroke(Color.primary.opacity(0.15), lineWidth: 1)
+                    .frame(width: ringRadius * 2, height: ringRadius * 2)
 
-                // Clock tick marks at 12/3/6/9
                 ForEach(0..<4, id: \.self) { i in
-                    let degrees = Double(i) * 90
                     Rectangle()
-                        .fill(Color.white.opacity(0.25))
+                        .fill(Color.primary.opacity(0.25))
                         .frame(width: 1, height: 6)
-                        .offset(y: -(diameter - 40) / 2)
-                        .rotationEffect(.degrees(degrees))
+                        .offset(y: -ringRadius)
+                        .rotationEffect(.degrees(Double(i) * 90))
                 }
 
-                // Center dot
                 Circle()
-                    .fill(Color.white.opacity(0.3))
+                    .fill(Color.primary.opacity(0.3))
                     .frame(width: 4, height: 4)
 
-                if anchors.isEmpty {
-                    Text("No anchored items yet.\nPin an app or enable dictation to see them here.")
+                if draggingId != nil {
+                    preferenceRay
+                    resolvedSlotDot
+                }
+
+                ForEach(resolvedRing, id: \.item.id) { positioned in
+                    tile(positioned)
+                }
+
+                // The ring is almost never empty - every running app is in
+                // it - so the empty state keys off having nothing draggable,
+                // and sits in the middle of the dimmed apps rather than
+                // replacing them.
+                if !hasAnchors {
+                    Text("Nothing pinned yet.\nPin an app or enable dictation to place it here.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 160)
-                } else {
-                    ForEach(anchors) { anchor in
-                        anchorTile(anchor)
-                    }
                 }
             }
             .frame(width: diameter, height: diameter)
-            // The named coordinate space must be on the ring ZStack, not on
-            // individual icons. `value.location` in the DragGesture below is
-            // reported in this space, so the angle math computes relative to
-            // the full ring instead of each icon's tiny local frame.
             .coordinateSpace(name: "layoutRing")
             .background(
                 Circle()
                     .fill(.ultraThinMaterial)
                     .padding(8)
             )
+            .animation(
+                .interpolatingSpring(stiffness: 260, damping: 22),
+                value: resolvedRing.map(\.angleDegrees)
+            )
+
+            Text("Dimmed icons are running apps that aren't pinned. They fill whatever slots are left.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
 
             Button("Reset to default layout") {
                 settings.resetLayoutAngles()
-                loadAnchors()
+                reload()
             }
             .buttonStyle(.borderless)
-            .disabled(anchors.isEmpty)
+            .disabled(!hasAnchors)
         }
         .padding(.vertical, 12)
-        .onAppear { loadAnchors() }
-        .onChange(of: settings.pinnedBundleIds) { loadAnchors() }
-        .onChange(of: settings.dictationEnabled) { loadAnchors() }
+        .onAppear { reload() }
+        .onChange(of: settings.pinnedBundleIds) { reload() }
+        .onChange(of: settings.dictationEnabled) { reload() }
+    }
+
+    // MARK: - Ring resolution
+
+    /// The ring as `RingLayout` resolves it right now. While a drag is in
+    /// flight the dragged item's stored preference is replaced by the live
+    /// drag angle, so the rest of the ring re-solves under the cursor.
+    private var resolvedRing: [RingLayout.Positioned] {
+        var preferred: [(item: OrbitItem, preferredAngle: Double)] = []
+        var others: [OrbitItem] = []
+
+        if settings.dictationEnabled, let stored = settings.dictationPreferredAngle {
+            let angle = (draggingId == "dictation") ? dragAngle : stored
+            preferred.append((.dictation, angle))
+        }
+
+        for app in runningApps {
+            guard let bundleId = app.bundleIdentifier,
+                  let stored = settings.pinnedPreferredAngles[bundleId]
+            else {
+                others.append(.app(app))
+                continue
+            }
+            let id = "app:\(bundleId)"
+            let angle = (draggingId == id) ? dragAngle : stored
+            preferred.append((.app(app), angle))
+        }
+
+        return RingLayout.compute(preferred: preferred, others: others)
+    }
+
+    /// True when there is at least one draggable item in the ring.
+    private var hasAnchors: Bool {
+        resolvedRing.contains { $0.isAnchored }
+    }
+
+    /// The drag id for an item, or nil when it is not draggable.
+    private func anchorId(for item: OrbitItem) -> String? {
+        switch item {
+        case .dictation:
+            return "dictation"
+        case .app(let app):
+            guard let bundleId = app.bundleIdentifier,
+                  settings.pinnedPreferredAngles[bundleId] != nil
+            else { return nil }
+            return "app:\(bundleId)"
+        }
     }
 
     // MARK: - Subviews
 
     @ViewBuilder
-    private func anchorTile(_ anchor: Anchor) -> some View {
-        let liveAngle = (draggingId == anchor.id) ? dragAngle : anchor.angleDegrees
-        let position = positionForAngle(liveAngle)
+    private func tile(_ positioned: RingLayout.Positioned) -> some View {
+        let id = anchorId(for: positioned.item)
+        let isDragged = id != nil && id == draggingId
+        // The dragged icon follows the cursor freely; everything else sits on
+        // its resolved slot.
+        let angle = isDragged ? dragAngle : positioned.angleDegrees
+        let size = positioned.isAnchored ? anchorIconSize : otherIconSize
 
         Group {
-            switch anchor.icon {
-            case .app(let image):
-                Image(nsImage: image)
+            switch positioned.item {
+            case .app(let app):
+                Image(nsImage: app.icon)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: iconSize, height: iconSize)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.18))
             case .dictation:
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: size * 0.18)
                     .fill(.ultraThinMaterial)
-                    .frame(width: iconSize, height: iconSize)
+                    .frame(width: size, height: size)
                     .overlay(
                         Image(systemName: "mic.fill")
-                            .font(.system(size: iconSize * 0.5, weight: .medium))
+                            .font(.system(size: size * 0.5, weight: .medium))
                             .foregroundStyle(.primary)
                     )
             }
         }
-        .shadow(color: .black.opacity(0.3), radius: 4)
-        // .position() moves BOTH the visual placement AND the hit-testing
-        // region of the view. .offset() only moves the visual — gesture hit
-        // regions stay at the original un-offset position, which made drags
-        // silently fail in an earlier iteration.
-        .position(position)
-        .gesture(
-            DragGesture(minimumDistance: 0, coordinateSpace: .named("layoutRing"))
-                .onChanged { value in
-                    let computed = angleFrom(point: value.location)
-                    NSLog("[Orbit.layout] drag \(anchor.id) location=\(value.location) computed=\(computed)°")
-                    draggingId = anchor.id
-                    dragAngle = computed
-                }
-                .onEnded { value in
-                    let raw = angleFrom(point: value.location)
-                    let snapped = snap(raw, avoiding: anchor.id)
-                    NSLog("[Orbit.layout] drag end \(anchor.id) raw=\(raw)° snapped=\(snapped)°")
-                    draggingId = nil
-                    dragAngle = snapped
-                    commit(anchor: anchor, angle: snapped)
-                }
-        )
+        .opacity(positioned.isAnchored ? 1.0 : 0.35)
+        .position(positionForAngle(angle))
+        .allowsHitTesting(positioned.isAnchored)
+        .gesture(dragGesture(for: id))
+    }
+
+    private func dragGesture(for id: String?) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("layoutRing"))
+            .onChanged { value in
+                guard let id else { return }
+                draggingId = id
+                dragAngle = angleFrom(point: value.location)
+            }
+            .onEnded { value in
+                guard let id else { return }
+                let angle = angleFrom(point: value.location)
+                draggingId = nil
+                dragAngle = angle
+                commit(id: id, angle: angle)
+            }
+    }
+
+    /// Hairline from the center showing the direction the cursor is pointing.
+    private var preferenceRay: some View {
+        Path { path in
+            path.move(to: center)
+            path.addLine(to: positionForAngle(dragAngle))
+        }
+        .stroke(Color.primary.opacity(0.25), lineWidth: 1)
+    }
+
+    /// Small accent dot marking the slot the dragged item will land on.
+    @ViewBuilder
+    private var resolvedSlotDot: some View {
+        if let draggingId,
+           let resolved = resolvedRing.first(where: { anchorId(for: $0.item) == draggingId })
+        {
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: 6, height: 6)
+                .position(positionForAngle(resolved.angleDegrees))
+        }
     }
 
     // MARK: - Angle math
 
-    /// Convert a point inside the ring frame into a degrees-from-12-o'clock
-    /// angle. The input point comes from the drag gesture's named coordinate
-    /// space, which has (0, 0) at the top-left of the ZStack.
+    /// Convert a point in the ring's named coordinate space into a
+    /// degrees-clockwise-from-twelve angle. SwiftUI's +y goes down, so twelve
+    /// o'clock is -y and `atan2(dx, -dy)` gives the clockwise angle.
     private func angleFrom(point: CGPoint) -> Double {
-        let center = CGPoint(x: diameter / 2, y: diameter / 2)
         let dx = point.x - center.x
         let dy = point.y - center.y
-        // SwiftUI's coordinate system has +y going down. 12 o'clock is -y.
-        // atan2(dx, -dy) gives the clockwise angle from 12 o'clock in radians.
-        let radians = atan2(dx, -dy)
-        var degrees = radians * 180 / .pi
+        var degrees = atan2(dx, -dy) * 180 / .pi
         if degrees < 0 { degrees += 360 }
         return degrees
     }
 
-    /// Converts a clockwise-from-12-o'clock angle into an absolute point
-    /// inside the ring's ZStack coordinate space (same space that the
-    /// DragGesture reports its `value.location` in).
+    /// 0 degrees is twelve o'clock, clockwise. In SwiftUI's +y-down space
+    /// that is x = sin(theta), y = -cos(theta).
     private func positionForAngle(_ degrees: Double) -> CGPoint {
-        let center = CGPoint(x: diameter / 2, y: diameter / 2)
-        let radius = (diameter - 40) / 2
         let radians = degrees * .pi / 180
-        // 0° = 12 o'clock, clockwise. In SwiftUI's +y-down space that's
-        // x = sin(θ), y = -cos(θ).
-        let dx = CGFloat(sin(radians)) * radius
-        let dy = CGFloat(cos(radians)) * radius
-        return CGPoint(x: center.x + dx, y: center.y - dy)
-    }
-
-    /// Snap to the nearest 15° increment, then nudge off any occupied slot
-    /// within `collisionThreshold` degrees. Search clockwise then
-    /// counter-clockwise in 15° steps for a free slot.
-    private func snap(_ degrees: Double, avoiding selfId: String) -> Double {
-        var snapped = (degrees / snapIncrement).rounded() * snapIncrement
-        snapped = snapped.truncatingRemainder(dividingBy: 360)
-        if snapped < 0 { snapped += 360 }
-
-        let occupied = anchors
-            .filter { $0.id != selfId }
-            .map { normalize($0.angleDegrees) }
-
-        func conflicts(_ angle: Double) -> Bool {
-            occupied.contains { abs(smallestDifference($0, angle)) < collisionThreshold }
-        }
-
-        if !conflicts(snapped) { return snapped }
-
-        // Walk outward from the snapped slot, alternating clockwise and
-        // counter-clockwise, until a free slot is found.
-        for step in 1...24 {
-            let offsetDegrees = Double(step) * snapIncrement
-            let cw = normalize(snapped + offsetDegrees)
-            if !conflicts(cw) { return cw }
-            let ccw = normalize(snapped - offsetDegrees)
-            if !conflicts(ccw) { return ccw }
-        }
-        return snapped // gave up; last-writer wins
-    }
-
-    private func smallestDifference(_ a: Double, _ b: Double) -> Double {
-        var diff = a - b
-        while diff > 180 { diff -= 360 }
-        while diff < -180 { diff += 360 }
-        return diff
-    }
-
-    private func normalize(_ degrees: Double) -> Double {
-        var d = degrees.truncatingRemainder(dividingBy: 360)
-        if d < 0 { d += 360 }
-        return d
+        return CGPoint(
+            x: center.x + CGFloat(sin(radians)) * ringRadius,
+            y: center.y - CGFloat(cos(radians)) * ringRadius
+        )
     }
 
     // MARK: - Persistence
 
-    private func loadAnchors() {
-        var result: [Anchor] = []
+    private func reload() {
         settings.ensurePreferredAngles()
-
-        if settings.dictationEnabled {
-            result.append(
-                Anchor(
-                    id: "dictation",
-                    kind: .dictation,
-                    angleDegrees: settings.dictationPreferredAngle ?? 0,
-                    displayName: "Dictation",
-                    icon: .dictation
-                )
-            )
-        }
-
-        for bundleId in settings.pinnedBundleIds {
-            guard let runningApp = NSWorkspace.shared.runningApplications.first(where: {
-                $0.bundleIdentifier == bundleId
-            }) else { continue }
-
-            let angle = settings.pinnedPreferredAngles[bundleId] ?? 0
-            let icon = runningApp.icon ?? NSImage(size: NSSize(width: 32, height: 32))
-            result.append(
-                Anchor(
-                    id: "app:\(bundleId)",
-                    kind: .pinnedApp,
-                    angleDegrees: angle,
-                    displayName: runningApp.localizedName ?? bundleId,
-                    icon: .app(icon)
-                )
-            )
-        }
-
-        anchors = result
+        runningApps = AppService.runningApps(
+            excluding: settings.excludedBundleIds,
+            pinnedFirst: settings.pinnedBundleIds
+        )
     }
 
-    private func commit(anchor: Anchor, angle: Double) {
-        switch anchor.kind {
-        case .dictation:
+    private func commit(id: String, angle: Double) {
+        if id == "dictation" {
             settings.dictationPreferredAngle = angle
-        case .pinnedApp:
-            let bundleId = String(anchor.id.dropFirst("app:".count))
-            settings.pinnedPreferredAngles[bundleId] = angle
+        } else {
+            settings.pinnedPreferredAngles[String(id.dropFirst("app:".count))] = angle
         }
         settings.save()
-        loadAnchors()
     }
 }
