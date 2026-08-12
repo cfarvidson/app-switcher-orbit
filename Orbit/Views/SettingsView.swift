@@ -1,49 +1,6 @@
 import Carbon
 import SwiftUI
 
-/// Catalog of WhisperKit models the user can pick from in Settings. The
-/// model identifier matches the `variant` argument WhisperKit's downloader
-/// expects (and corresponds to a folder in
-/// `argmaxinc/whisperkit-coreml` on Hugging Face).
-struct WhisperModelOption: Identifiable {
-    let id: String
-    let label: String
-    let description: String
-
-    static let all: [WhisperModelOption] = [
-        WhisperModelOption(
-            id: "openai_whisper-tiny",
-            label: "Tiny (~75 MB)",
-            description: "Fastest, lowest quality. Good for testing or very limited disk."
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-base",
-            label: "Base (~150 MB)",
-            description: "Balanced. Decent quality, fast cold-start."
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-small",
-            label: "Small (~500 MB) — recommended",
-            description: "Strong sweet spot for dictation. Good multilingual quality, real-time on Apple Silicon."
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-medium",
-            label: "Medium (~1.5 GB)",
-            description: "High quality. Slower cold-start, more RAM. Best for difficult audio."
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-large-v3-v20240930",
-            label: "Large v3 Turbo (~1.5 GB)",
-            description: "Apple's Whisper Turbo (Sep 2024) — large-v3 transcription quality at small-like speed."
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-large-v3",
-            label: "Large v3 (~2.9 GB)",
-            description: "Full Whisper Large v3. Highest quality, but slower and more RAM than Turbo."
-        ),
-    ]
-}
-
 struct SettingsView: View {
     @ObservedObject var settings = SettingsService.shared
     @ObservedObject var speech = SpeechRecognitionService.shared
@@ -308,30 +265,10 @@ struct SettingsView: View {
 
             if settings.dictationEnabled {
                 Section("Speech model") {
-                    Picker("Model", selection: $settings.dictationModelName) {
-                        ForEach(WhisperModelOption.all) { option in
-                            Text(option.label).tag(option.id)
-                        }
-                    }
-                    .onChange(of: settings.dictationModelName) {
-                        settings.save()
-                        let newModel = settings.dictationModelName
-                        if speech.isModelDownloaded(newModel) {
-                            // Already on disk — load it eagerly so the next
-                            // dictation click is instant.
-                            Task { await speech.downloadAndLoadModel(newModel) }
-                        } else {
-                            // Not downloaded — flip the published status so
-                            // the status row shows the Download button for
-                            // the new selection (otherwise it would still
-                            // show the previously-loaded model's "Ready"
-                            // state, hiding the button).
-                            speech.modelStatus = .notDownloaded
-                        }
-                    }
-
-                    if let info = WhisperModelOption.all.first(where: { $0.id == settings.dictationModelName }) {
-                        Text(info.description)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(SpeechRecognitionService.modelDisplayName)
+                            .font(.body)
+                        Text("Runs on-device via CoreML. Covers 25 European languages with automatic language detection, punctuation and capitalization.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -379,7 +316,7 @@ struct SettingsView: View {
                     }
                     Slider(value: $settings.dictationSilenceTriggerSeconds, in: 0.5...3.0, step: 0.1)
                         .onChange(of: settings.dictationSilenceTriggerSeconds) { settings.save() }
-                    Text("How long Whisper waits in silence before transcribing what you've said. Higher values let you pause mid-sentence without fragmenting the output. Default 0.8s.")
+                    Text("How long Orbit waits in silence before transcribing what you've said. Higher values let you pause mid-sentence without fragmenting the output. Default 0.8s.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -400,15 +337,15 @@ struct SettingsView: View {
                     Text("Not downloaded")
                         .foregroundStyle(.secondary)
                 }
-                Button("Download \(WhisperModelOption.all.first { $0.id == settings.dictationModelName }?.label ?? settings.dictationModelName)") {
-                    Task { await speech.downloadAndLoadModel(settings.dictationModelName) }
+                Button("Download \(SpeechRecognitionService.modelDisplayName)") {
+                    Task { await speech.downloadAndLoadModel() }
                 }
                 .buttonStyle(.bordered)
             }
-        case .downloading(let progress, let modelName):
+        case .downloading(let progress):
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Downloading \(modelName)\u{2026}")
+                    Text("Downloading\u{2026}")
                     Spacer()
                     Text("\(Int(progress * 100))%")
                         .foregroundStyle(.secondary)
@@ -417,19 +354,19 @@ struct SettingsView: View {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
             }
-        case .loading(let modelName):
+        case .loading:
             HStack {
                 ProgressView()
                     .scaleEffect(0.6)
                     .frame(width: 16, height: 16)
-                Text("Loading \(modelName)\u{2026}")
+                Text("Loading\u{2026}")
                     .foregroundStyle(.secondary)
             }
-        case .ready(let modelName):
+        case .ready:
             HStack {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-                Text("Ready (\(modelName))")
+                Text("Ready")
                     .foregroundStyle(.secondary)
             }
         case .error(let message):
@@ -444,7 +381,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Retry") {
-                    Task { await speech.downloadAndLoadModel(settings.dictationModelName) }
+                    Task { await speech.downloadAndLoadModel() }
                 }
                 .buttonStyle(.bordered)
             }
@@ -454,7 +391,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var dictationShortcutStatusRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Orbit runs OpenAI Whisper locally via WhisperKit (CoreML on Apple Silicon) — recognition is entirely on-device and bypasses the system Dictation HUD. macOS will prompt for microphone permission the first time you click the dictation tile. Click the floating indicator or press ESC to stop dictation.")
+            Text("Orbit runs Parakeet TDT 0.6B v3 locally via FluidAudio (CoreML on Apple Silicon) - recognition is entirely on-device and bypasses the system Dictation HUD. macOS will prompt for microphone permission the first time you start dictation. Click the floating indicator or press ESC to stop.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

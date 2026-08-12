@@ -26,7 +26,6 @@ final class SettingsService: ObservableObject {
     @Published var pinnedBundleIds: [String]
     @Published var excludedBundleIds: Set<String>
     @Published var dictationEnabled: Bool
-    @Published var dictationModelName: String
     @Published var dictationSilenceTriggerSeconds: Double
     @Published var pinnedAngles: [String: Double]
     @Published var dictationAngle: Double?
@@ -57,35 +56,12 @@ final class SettingsService: ObservableObject {
         dictationEnabled = defaults.object(forKey: "dictationEnabled") != nil
             ? defaults.bool(forKey: "dictationEnabled")
             : false
-        dictationModelName = SettingsService.sanitizeModelName(
-            defaults.string(forKey: "dictationModelName")
-        )
         dictationSilenceTriggerSeconds = defaults.object(forKey: "dictationSilenceTriggerSeconds") != nil
             ? defaults.double(forKey: "dictationSilenceTriggerSeconds")
             : 0.8
         pinnedAngles = SettingsService.loadAngleDict(defaults: defaults, key: "pinnedAngles")
         dictationAngle = defaults.object(forKey: "dictationAngle") as? Double
         dictationInputDeviceUID = defaults.string(forKey: "dictationInputDeviceUID")
-    }
-
-    /// Maps any saved model name to a known-valid one. Migrates users who
-    /// had the old buggy `openai_whisper-large-v3-turbo` (which never
-    /// existed in WhisperKit's HuggingFace repo) to the recommended
-    /// `openai_whisper-small`. Unknown names also fall back to small so
-    /// the picker never shows an empty selection.
-    private static func sanitizeModelName(_ raw: String?) -> String {
-        let validModels: Set<String> = [
-            "openai_whisper-tiny",
-            "openai_whisper-base",
-            "openai_whisper-small",
-            "openai_whisper-medium",
-            "openai_whisper-large-v3-v20240930",
-            "openai_whisper-large-v3",
-        ]
-        guard let name = raw, validModels.contains(name) else {
-            return "openai_whisper-small"
-        }
-        return name
     }
 
     /// Converts a UserDefaults-stored dictionary back to `[String: Double]`.
@@ -116,7 +92,6 @@ final class SettingsService: ObservableObject {
         defaults.set(pinnedBundleIds, forKey: "pinnedBundleIds")
         defaults.set(Array(excludedBundleIds), forKey: "excludedBundleIds")
         defaults.set(dictationEnabled, forKey: "dictationEnabled")
-        defaults.set(dictationModelName, forKey: "dictationModelName")
         defaults.set(dictationSilenceTriggerSeconds, forKey: "dictationSilenceTriggerSeconds")
         defaults.set(pinnedAngles, forKey: "pinnedAngles")
         if let angle = dictationAngle {

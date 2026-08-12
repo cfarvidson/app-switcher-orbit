@@ -28,8 +28,7 @@ import os
 ///      indicator stops it. Re-triggering Orbit stops it.
 ///
 /// Lazy model load: FluidAudio downloads the Parakeet CoreML model bundle on
-/// first use. There is only one supported model; Settings'
-/// `dictationModelName` selection is temporarily ignored (Task 4 removes it).
+/// first use. There is only one supported model.
 final class SpeechRecognitionService: ObservableObject {
     static let shared = SpeechRecognitionService()
 
@@ -38,9 +37,9 @@ final class SpeechRecognitionService: ObservableObject {
     /// Model lifecycle state, observable from SwiftUI Settings views.
     enum ModelStatus: Equatable {
         case notDownloaded
-        case downloading(progress: Double, modelName: String)  // 0..1
-        case loading(modelName: String)
-        case ready(modelName: String)
+        case downloading(progress: Double)  // 0..1
+        case loading
+        case ready
         case error(String)
     }
 
@@ -451,10 +450,8 @@ final class SpeechRecognitionService: ObservableObject {
     // MARK: - Model availability + download
 
     /// Returns true if the Parakeet model files are present in FluidAudio's
-    /// cache. Doesn't trigger any network or load. The `modelName` argument
-    /// is ignored - there is exactly one supported model.
-    /// TEMPORARY signature (Task 1): the argument is removed in Task 4.
-    func isModelDownloaded(_ modelName: String = SpeechRecognitionService.modelDisplayName) -> Bool {
+    /// cache. Doesn't trigger any network or load.
+    func isModelDownloaded() -> Bool {
         AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory(for: .v3), version: .v3)
     }
 
@@ -462,33 +459,29 @@ final class SpeechRecognitionService: ObservableObject {
     /// needed (with progress) and loads it into memory. Updates
     /// `modelStatus` throughout the lifecycle. Idempotent — calling while a
     /// download is already in flight is a no-op.
-    /// TEMPORARY signature (Task 1): the argument is removed in Task 4.
     @MainActor
-    func downloadAndLoadModel(_ modelName: String = SpeechRecognitionService.modelDisplayName) async {
+    func downloadAndLoadModel() async {
         if modelsLoading { return }
         if asrManager != nil {
-            modelStatus = .ready(modelName: Self.modelDisplayName)
+            modelStatus = .ready
             return
         }
         modelsLoading = true
         defer { modelsLoading = false }
 
         do {
-            modelStatus = .downloading(progress: 0, modelName: Self.modelDisplayName)
+            modelStatus = .downloading(progress: 0)
             NSLog("[Orbit.speech] downloading/loading \(Self.modelDisplayName)…")
             let models = try await AsrModels.downloadAndLoad(version: .v3) { progress in
                 Task { @MainActor in
-                    self.modelStatus = .downloading(
-                        progress: progress.fractionCompleted,
-                        modelName: Self.modelDisplayName
-                    )
+                    self.modelStatus = .downloading(progress: progress.fractionCompleted)
                 }
             }
-            modelStatus = .loading(modelName: Self.modelDisplayName)
+            modelStatus = .loading
             let manager = AsrManager(config: .default)
             try await manager.loadModels(models)
             asrManager = manager
-            modelStatus = .ready(modelName: Self.modelDisplayName)
+            modelStatus = .ready
             NSLog("[Orbit.speech] Parakeet ready")
         } catch {
             NSLog("[Orbit.speech] downloadAndLoadModel failed: \(error)")
