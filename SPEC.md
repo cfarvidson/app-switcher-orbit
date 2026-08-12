@@ -116,7 +116,7 @@ static func nextAnchorAngle(existingAngles: [Double]) -> Double
 
 - `compute` places anchored items (pinned apps and the dictation tile) at their stored angles, sorted clockwise, then distributes the non-pinned running apps across the gaps between anchors proportionally to each gap's arc. Fractional leftovers are handed to the gaps with the largest remainders so the placed count always matches the input count. Items inside a gap are evenly spaced with equal margins at both ends so they do not collide with the anchors.
 - With no anchors at all, `compute` falls back to even distribution over 360°.
-- `nextAnchorAngle` returns the angle for a newly anchored item: `0` when there are no anchors, the point opposite the single existing anchor when there is one, otherwise the midpoint of the largest empty arc.
+- `nextAnchorAngle` returns the angle for a newly anchored item: `0` when there are no anchors, the point opposite the single existing anchor when there is one, otherwise the midpoint of the largest empty arc. Duplicate angles in the input are tolerated and contribute a zero-width gap, never a full circle; if every anchor sits at the same angle there is no arc to measure and the result is the opposite point. This matters because `compute` has no duplicate handling: two anchors sharing an angle render stacked on the same point, with the later one taking the hit-testing, so an anchor placed on top of another looks and behaves like the wrong tile.
 
 ## AppService
 
