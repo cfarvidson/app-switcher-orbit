@@ -274,7 +274,7 @@ Orbit does not read or write `com.apple.speech.recognition.AppleSpeechRecognitio
 
 ## SpeechRecognitionService
 
-`ObservableObject` singleton (`SpeechRecognitionService.shared`) that runs the entire dictation pipeline in-process on NVIDIA Parakeet TDT 0.6B v3, a transducer ASR model executed as CoreML on Apple Silicon through the FluidAudio package. Parakeet auto-detects the spoken language across 25 European languages and emits punctuation and capitalization, so there is no locale to configure and nothing to select per session.
+`ObservableObject` singleton (`SpeechRecognitionService.shared`) that runs the entire dictation pipeline in-process on NVIDIA Parakeet TDT 0.6B v3, a transducer ASR model executed as CoreML on Apple Silicon through the FluidAudio package. Parakeet auto-detects the spoken language across 25 European languages and emits punctuation and capitalization, so there is no recognition locale to configure and nothing to select per session. The one language-adjacent setting, `dictationLanguages`, does not pick a recognition language either - it constrains which writing script the decoder may emit, because auto-detection sometimes lands on the wrong alphabet entirely. See **Language scope** below.
 
 The service holds a `FluidAudio.AsrManager` (`private var asrManager: AsrManager?`), created and loaded once and reused for every session.
 
@@ -359,6 +359,8 @@ One further subtlety drives the mapping: `TdtDecoderV3` additionally applies an 
 6. All `.greek`: return `.greek`.
 
 `DictationLanguageScope.supportedCodes` exposes every code Parakeet supports, derived from `Language.allCases` rather than hardcoded, and is what `SettingsService.seedLanguagesFromSystem()` filters against.
+
+**Known limitation in the seed.** Seeding compares on the language subtag only, so a BCP-47 tag that carries a script subtag loses it: `sr-Latn-RS` (Serbian written in the Latin alphabet) seeds as `sr`, which FluidAudio classifies as `.cyrillic`. A user whose macOS languages are Latin Serbian plus English therefore gets a mixed-script selection on first run, which disables filtering and shows the mixed-alphabet warning they never asked for. This is not worked around, because FluidAudio's `Language` has no Latin-Serbian case to map to - there is no correct value to pick. Unchecking Serbian in the picker resolves it. `zh-Hans-CN` and similar are unaffected, since `zh` is not in the supported set and is dropped.
 
 The hint is computed at each of the two transcribe call sites - the final flush in `stop(reason:flushBuffer:)` and the mid-session flush in `flushAndTranscribe()` - rather than cached per session, so a settings change takes effect on the next utterance instead of the next session. `flushAndTranscribe` logs the resolved hint as `[Orbit.speech] language hint=...`, which is the only observable evidence the wiring is live.
 
@@ -613,7 +615,7 @@ A `TabView` with five tabs (Shortcut, Pinned, Apps, Dictation, Layout). The view
 
 ### Dictation Tab
 
-There are no language pickers and no model picker: Parakeet detects the language itself and Orbit ships one model.
+There is no model picker: Orbit ships one model. There is a language selector, but it does not choose a recognition language - Parakeet still detects that itself. It narrows the writing script the decoder may emit; see **Language scope** under `## SpeechRecognitionService`.
 
 - **Master enable toggle**: "Show the dictation tile in the ring" - bound to `SettingsService.dictationEnabled`. Off by default. Caption explains that selecting the tile starts on-device dictation, that the spoken language is detected automatically, and that no audio leaves the Mac. Switching it on calls `SettingsService.ensurePreferredAngles()` so the tile has a preferred direction the next time the ring opens.
 - **Speech model section** (visible only when enabled):

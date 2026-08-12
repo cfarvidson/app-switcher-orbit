@@ -21,8 +21,9 @@ import os
 ///   1. `AVAudioEngine` taps the input node and accumulates samples in a
 ///      ring buffer (16 kHz mono float, the format Parakeet expects).
 ///   2. Voice activity detection flushes the buffer to
-///      `AsrManager.transcribe(_:decoderState:)` once the user
-///      pauses (see the VAD section below).
+///      `AsrManager.transcribe(_:decoderState:language:)` once the user
+///      pauses (see the VAD section below). The `language:` argument is the
+///      script hint from `DictationLanguageScope`, not a recognition locale.
 ///   3. When the resulting transcript extends what we've already injected,
 ///      we type the new portion via `CGEvent.keyboardSetUnicodeString`.
 ///   4. ESC cancels the session (discarding the buffer) and is swallowed so
