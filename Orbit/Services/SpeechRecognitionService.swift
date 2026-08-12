@@ -310,7 +310,12 @@ final class SpeechRecognitionService: ObservableObject {
             return
         }
 
-        dictationState = (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .listening
+        // `.starting`, not `.listening`, when the model is already loaded:
+        // capture has not begun yet, and `beginCapture` below sets `.starting`
+        // anyway. Claiming `.listening` here made the state run backwards
+        // (listening -> starting -> listening within ~150ms), which the old
+        // panel hid but the menu bar icon renders as a visible flicker.
+        dictationState = (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .starting
 
         ensurePermissions { [weak self] granted in
             guard let self else { return }
