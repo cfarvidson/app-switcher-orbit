@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Combine
 import CoreAudio
 import CoreGraphics
 import FluidAudio
@@ -44,6 +45,23 @@ final class SpeechRecognitionService: ObservableObject {
     }
 
     @Published var modelStatus: ModelStatus = .notDownloaded
+
+    /// Presentation-facing dictation lifecycle state. The service publishes it
+    /// and does not care who renders it; `StatusItemController` maps it to a
+    /// menu bar icon treatment.
+    ///
+    /// `.transcribing` covers only the post-stop final flush. Mid-session VAD
+    /// flushes deliberately stay `.listening`: the session is still capturing,
+    /// and flipping the icon on every natural pause would strobe it.
+    enum DictationState: Equatable {
+        case idle
+        case loading(message: String)
+        case starting
+        case listening
+        case transcribing
+    }
+
+    @Published private(set) var dictationState: DictationState = .idle
 
     // MARK: - Parakeet setup
 
@@ -133,7 +151,15 @@ final class SpeechRecognitionService: ObservableObject {
     /// `cancelWarmup()` actually needs to do anything.
     private var warmupActive: Bool = false
 
-    private init() {}
+    private var stateLogCancellable: AnyCancellable?
+
+    private init() {
+        stateLogCancellable = $dictationState
+            .removeDuplicates()
+            .sink { state in
+                NSLog("[Orbit.dictation] state=\(state)")
+            }
+    }
 
     // MARK: - Public API
 
@@ -290,6 +316,7 @@ final class SpeechRecognitionService: ObservableObject {
         // model is downloaded but might still be loading into RAM.
         let initialState: RecordingIndicatorPanel.State =
             (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .listening
+        dictationState = (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .listening
         showIndicator(state: initialState)
 
         ensurePermissions { [weak self] granted in
@@ -300,6 +327,7 @@ final class SpeechRecognitionService: ObservableObject {
                 DispatchQueue.main.async {
                     self.indicatorPanel?.hideIndicator()
                     self.indicatorPanel = nil
+                    self.dictationState = .idle
                     onError("Microphone permission denied")
                     self.showMicPermissionAlert()
                 }
@@ -312,6 +340,7 @@ final class SpeechRecognitionService: ObservableObject {
                         self.promoteWarmupToSession()
                     } else {
                         self.indicatorPanel?.updateState(.starting)
+                        self.dictationState = .starting
                         self.beginCapture(onError: onError)
                     }
                 }
@@ -427,6 +456,7 @@ final class SpeechRecognitionService: ObservableObject {
         if flushBuffer, hadSpeech, finalSnapshot.count > minSamples, let manager = asrManager, !transcribing {
             NSLog("[Orbit.speech] stop: final flush \(String(format: "%.2f", Double(finalSnapshot.count) / targetSampleRate))s audio")
             transcribing = true
+            dictationState = .transcribing
             Task { [weak self] in
                 guard let self else { return }
                 do {
@@ -441,17 +471,20 @@ final class SpeechRecognitionService: ObservableObject {
                         self.handleFlushedTranscript(text)
                         self.injectedSoFar = ""
                         self.transcribing = false
+                        self.dictationState = .idle
                     }
                 } catch {
                     NSLog("[Orbit.speech] final flush transcribe error: \(error.localizedDescription)")
                     await MainActor.run {
                         self.injectedSoFar = ""
                         self.transcribing = false
+                        self.dictationState = .idle
                     }
                 }
             }
         } else {
             injectedSoFar = ""
+            dictationState = .idle
         }
     }
 
@@ -508,6 +541,7 @@ final class SpeechRecognitionService: ObservableObject {
             onError("Failed to load the Parakeet model. Set up dictation in Settings → Dictation.")
             indicatorPanel?.hideIndicator()
             indicatorPanel = nil
+            dictationState = .idle
         }
     }
 
@@ -552,6 +586,7 @@ final class SpeechRecognitionService: ObservableObject {
         // The engine has been delivering buffers since warmup; flip indicator
         // straight to .listening (skip the .starting state, no startup gap).
         indicatorPanel?.updateState(.listening)
+        dictationState = .listening
         NSLog("[Orbit.speech] promoted warmup to session, preroll=\(audioBuffer.count) samples")
     }
 
@@ -620,6 +655,7 @@ final class SpeechRecognitionService: ObservableObject {
             onError("Audio engine failed to start: \(error.localizedDescription)")
             indicatorPanel?.hideIndicator()
             indicatorPanel = nil
+            dictationState = .idle
             return
         }
 
@@ -717,6 +753,7 @@ final class SpeechRecognitionService: ObservableObject {
         if shouldFlipToListening {
             DispatchQueue.main.async { [weak self] in
                 self?.indicatorPanel?.updateState(.listening)
+                self?.dictationState = .listening
             }
         }
 
