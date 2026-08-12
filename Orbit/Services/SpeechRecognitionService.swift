@@ -108,11 +108,6 @@ final class SpeechRecognitionService: ObservableObject {
     private var lastInjectionTime: CFTimeInterval = 0
     private let injectionGracePeriod: CFTimeInterval = 0.25
 
-    /// TEMPORARY (Task 1): retained only so `startTranslation` and the
-    /// indicator keep compiling until Task 2 deletes the translate feature.
-    private enum SessionTask { case transcribe, translate }
-    private var currentTask: SessionTask = .transcribe
-    private var currentTranslationTargetId: String?
     private var hasReceivedFirstAudioBuffer: Bool = false
 
     /// Circular buffer holding the most recent ~2 seconds of audio captured
@@ -156,31 +151,14 @@ final class SpeechRecognitionService: ObservableObject {
     /// TEMPORARY signature (Task 1): `localeId` is ignored by the engine but
     /// still used for the recording indicator's flag/label. Removed in Task 3.
     func startDictation(localeId: String, onError: @escaping (String) -> Void = { _ in }) {
-        startInternal(
-            localeId: localeId,
-            task: .transcribe,
-            targetLocaleIdForDisplay: nil,
-            onError: onError
-        )
-    }
-
-    /// TEMPORARY (Task 1): Parakeet has no translation mode. Delegates to a
-    /// normal dictation session so the app keeps working until Task 2
-    /// removes the translate feature entirely.
-    func startTranslation(
-        sourceLocaleId: String,
-        targetLocaleId: String,
-        onError: @escaping (String) -> Void = { _ in }
-    ) {
-        NSLog("[Orbit.speech] startTranslation called but Parakeet cannot translate - running plain dictation")
-        startDictation(localeId: sourceLocaleId, onError: onError)
+        startInternal(localeId: localeId, onError: onError)
     }
 
     /// Starts the audio engine in warmup mode without showing an indicator
     /// or committing to a session. Fills a circular preroll buffer with
-    /// recent audio so a subsequent `startDictation` / `startTranslation`
-    /// call can promote the warmup into an active session with the
-    /// last ~2 seconds of audio already captured.
+    /// recent audio so a subsequent `startDictation` call can promote the
+    /// warmup into an active session with the last ~2 seconds of audio
+    /// already captured.
     ///
     /// Idempotent — calling while warmup or a session is already running
     /// is a no-op. Silently does nothing if mic permission is not granted
@@ -273,8 +251,6 @@ final class SpeechRecognitionService: ObservableObject {
 
     private func startInternal(
         localeId: String,
-        task: SessionTask,
-        targetLocaleIdForDisplay: String?,
         onError: @escaping (String) -> Void
     ) {
         let now = CACurrentMediaTime()
@@ -289,9 +265,6 @@ final class SpeechRecognitionService: ObservableObject {
             stop()
         }
 
-        currentTask = task
-        currentTranslationTargetId = targetLocaleIdForDisplay
-
         // Hard pre-flight: if the model isn't downloaded yet, refuse to
         // start and tell the user where to set it up. We never trigger
         // automatic downloads from a tile click — downloads happen only
@@ -300,8 +273,6 @@ final class SpeechRecognitionService: ObservableObject {
         guard isModelDownloaded() else {
             NSLog("[Orbit.speech] start aborted - Parakeet model not downloaded")
             starting = false
-            currentTask = .transcribe
-            currentTranslationTargetId = nil
             onError("Speech model not downloaded. Set it up in Settings → Dictation.")
             showSetupReminderNotification()
             return
@@ -481,10 +452,6 @@ final class SpeechRecognitionService: ObservableObject {
         } else {
             injectedSoFar = ""
         }
-        // Reset task state AFTER the final-flush block so capturedTask above
-        // reads the session's actual task, not the post-reset value.
-        currentTask = .transcribe
-        currentTranslationTargetId = nil
     }
 
     // MARK: - Model availability + download
@@ -954,11 +921,7 @@ final class SpeechRecognitionService: ObservableObject {
 
     private func showIndicator(localeId: String, state: RecordingIndicatorPanel.State) {
         let panel = RecordingIndicatorPanel()
-        panel.show(
-            localeId: localeId,
-            state: state,
-            targetLocaleId: currentTranslationTargetId
-        ) { [weak self] in
+        panel.show(localeId: localeId, state: state) { [weak self] in
             DispatchQueue.main.async { self?.stop(reason: "indicator click") }
         }
         indicatorPanel = panel

@@ -42,12 +42,10 @@ final class RecordingIndicatorPanel: NSPanel {
     func show(
         localeId: String,
         state: State,
-        targetLocaleId: String? = nil,
         onStopTapped: @escaping () -> Void
     ) {
         let model = RecordingIndicatorModel(
             localeId: localeId,
-            targetLocaleId: targetLocaleId,
             state: state
         )
         self.model = model
@@ -86,12 +84,10 @@ final class RecordingIndicatorPanel: NSPanel {
 /// `listening` without rebuilding the SwiftUI view tree.
 final class RecordingIndicatorModel: ObservableObject {
     let localeId: String
-    let targetLocaleId: String?
     @Published var state: RecordingIndicatorPanel.State
 
-    init(localeId: String, targetLocaleId: String?, state: RecordingIndicatorPanel.State) {
+    init(localeId: String, state: RecordingIndicatorPanel.State) {
         self.localeId = localeId
-        self.targetLocaleId = targetLocaleId
         self.state = state
     }
 }
@@ -113,21 +109,6 @@ private struct RecordingIndicatorView: View {
             }
         }
         return scalar.isEmpty ? "🏳️" : scalar
-    }
-
-    private var targetFlagEmoji: String? {
-        guard let targetLocaleId = model.targetLocaleId,
-              let region = targetLocaleId.split(separator: "_").last,
-              region.count == 2
-        else { return nil }
-        let base: UInt32 = 127397
-        var scalar = ""
-        for ch in region.uppercased().unicodeScalars {
-            if let combined = UnicodeScalar(base + ch.value) {
-                scalar.unicodeScalars.append(combined)
-            }
-        }
-        return scalar.isEmpty ? nil : scalar
     }
 
     private var localeBadge: String {
@@ -185,17 +166,9 @@ private struct RecordingIndicatorView: View {
                 HStack(spacing: 4) {
                     Text(flagEmoji)
                         .font(.system(size: 16))
-                    if let targetFlag = targetFlagEmoji {
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text(targetFlag)
-                            .font(.system(size: 16))
-                    } else {
-                        Text(localeBadge)
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.primary)
-                    }
+                    Text(localeBadge)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.primary)
                     Text(statusText)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)

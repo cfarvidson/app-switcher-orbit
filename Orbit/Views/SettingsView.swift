@@ -9,49 +9,37 @@ struct WhisperModelOption: Identifiable {
     let id: String
     let label: String
     let description: String
-    /// Whether this model supports `task: .translate`. OpenAI's Turbo
-    /// variant (large-v3-turbo, dated v20240930) is fine-tuned for
-    /// transcription only and silently ignores translation requests,
-    /// so the translate tile produces source-language output if Turbo
-    /// is selected. All other models in the catalog support translation.
-    let supportsTranslation: Bool
 
     static let all: [WhisperModelOption] = [
         WhisperModelOption(
             id: "openai_whisper-tiny",
             label: "Tiny (~75 MB)",
-            description: "Fastest, lowest quality. Good for testing or very limited disk.",
-            supportsTranslation: true
+            description: "Fastest, lowest quality. Good for testing or very limited disk."
         ),
         WhisperModelOption(
             id: "openai_whisper-base",
             label: "Base (~150 MB)",
-            description: "Balanced. Decent quality, fast cold-start.",
-            supportsTranslation: true
+            description: "Balanced. Decent quality, fast cold-start."
         ),
         WhisperModelOption(
             id: "openai_whisper-small",
             label: "Small (~500 MB) — recommended",
-            description: "Strong sweet spot for dictation. Good multilingual quality, real-time on Apple Silicon.",
-            supportsTranslation: true
+            description: "Strong sweet spot for dictation. Good multilingual quality, real-time on Apple Silicon."
         ),
         WhisperModelOption(
             id: "openai_whisper-medium",
             label: "Medium (~1.5 GB)",
-            description: "High quality. Slower cold-start, more RAM. Best for difficult audio.",
-            supportsTranslation: true
+            description: "High quality. Slower cold-start, more RAM. Best for difficult audio."
         ),
         WhisperModelOption(
             id: "openai_whisper-large-v3-v20240930",
             label: "Large v3 Turbo (~1.5 GB)",
-            description: "Apple's Whisper Turbo (Sep 2024) — large-v3 transcription quality at small-like speed. Transcription only — does NOT support the translate tile (Whisper's Turbo distillation removed translation). Use Large v3 if you need translation.",
-            supportsTranslation: false
+            description: "Apple's Whisper Turbo (Sep 2024) — large-v3 transcription quality at small-like speed."
         ),
         WhisperModelOption(
             id: "openai_whisper-large-v3",
             label: "Large v3 (~2.9 GB)",
-            description: "Full Whisper Large v3. Highest quality, but slower and more RAM than Turbo. Required if you need the translate tile (Turbo cannot translate).",
-            supportsTranslation: true
+            description: "Full Whisper Large v3. Highest quality, but slower and more RAM than Turbo."
         ),
     ]
 }
@@ -403,7 +391,7 @@ struct SettingsView: View {
                 Button("Refresh list") { refreshInputDevices() }
                     .buttonStyle(.borderless)
 
-                Text("Orbit uses this microphone for all dictation and translation. \"System Default\" follows your macOS audio input setting.")
+                Text("Orbit uses this microphone for dictation. \"System Default\" follows your macOS audio input setting.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -423,61 +411,6 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            }
-
-            Section("Translation") {
-                Toggle("Show translate-to-English tile in Orbit ring", isOn: $settings.translateTileEnabled)
-                    .onChange(of: settings.translateTileEnabled) {
-                        settings.save()
-                        if settings.translateTileEnabled {
-                            // Assign an angle now so the tile appears at a
-                            // sensible spot the next time the ring opens,
-                            // not at 0° / overlapping an existing item.
-                            settings.ensureAnchorAngles(for: settings.dictationLanguages)
-                        }
-                    }
-
-                if let currentModel = WhisperModelOption.all.first(where: { $0.id == settings.dictationModelName }),
-                   !currentModel.supportsTranslation
-                {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(currentModel.label) does not support translation.")
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                            Text("The translate tile will produce source-language text instead of English. Switch to Large v3 or a smaller multilingual model in the Speech model section above.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if translateSourceCandidates.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Enable a non-English dictation language in System Settings → Keyboard → Dictation first.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Button("Open Dictation Settings\u{2026}") {
-                            openDictationSystemSettings()
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                } else {
-                    Picker("Source language", selection: $settings.translateSourceLocaleId) {
-                        ForEach(translateSourceCandidates) { language in
-                            Text("\(language.flagEmoji)  \(language.displayName)")
-                                .tag(language.id)
-                        }
-                    }
-                    .disabled(!settings.translateTileEnabled)
-                    .onChange(of: settings.translateSourceLocaleId) { settings.save() }
-                }
-
-                Text("Speak in the selected language. Orbit transcribes and translates to English in real time using Whisper. The macOS system Dictation language is not affected.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -576,14 +509,6 @@ struct SettingsView: View {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
             NSWorkspace.shared.open(url)
         }
-    }
-
-    /// Non-English locales the user has enabled in System Settings, used to
-    /// populate the translate-source picker. The translate tile cannot have
-    /// English as its source — Whisper would just produce identical English
-    /// output, which is degenerate.
-    private var translateSourceCandidates: [DictationLanguage] {
-        enabledDictationLocales.filter { !$0.id.hasPrefix("en") }
     }
 
     private func refreshDictationLocales() {

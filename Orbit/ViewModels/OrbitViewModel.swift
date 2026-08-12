@@ -74,9 +74,6 @@ final class OrbitViewModel: ObservableObject {
                 anchored.append((.language(language), angle))
             }
         }
-        if let pair = settings.translatePair, let angle = settings.translateAngle {
-            anchored.append((.translate(pair), angle))
-        }
         for app in anchoredApps {
             if let bundleId = app.bundleIdentifier, let angle = settings.pinnedAngles[bundleId] {
                 anchored.append((.app(app), angle))
@@ -100,7 +97,7 @@ final class OrbitViewModel: ObservableObject {
         // Pre-roll audio capture so the first phoneme spoken when the user
         // clicks a tile is not lost to AVAudioEngine startup latency. No-op
         // if mic permission isn't granted yet (no surprise prompts).
-        if SettingsService.shared.dictationEnabled || SettingsService.shared.translateTileEnabled {
+        if SettingsService.shared.dictationEnabled {
             SpeechRecognitionService.shared.warmupAudioCapture()
         }
     }
@@ -127,8 +124,6 @@ final class OrbitViewModel: ObservableObject {
                 app.app.activate()
             case .language(let language):
                 DictationService.switchLanguageAndStart(language.id)
-            case .translate(let pair):
-                DictationService.startTranslation(pair: pair)
             }
         }
     }

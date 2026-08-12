@@ -32,9 +32,6 @@ final class SettingsService: ObservableObject {
     @Published var dictationSilenceTriggerSeconds: Double
     @Published var pinnedAngles: [String: Double]
     @Published var languageAngles: [String: Double]
-    @Published var translateTileEnabled: Bool
-    @Published var translateSourceLocaleId: String
-    @Published var translateAngle: Double?
     @Published var dictationInputDeviceUID: String?
 
     private let defaults = UserDefaults.standard
@@ -72,11 +69,6 @@ final class SettingsService: ObservableObject {
             : 0.8
         pinnedAngles = SettingsService.loadAngleDict(defaults: defaults, key: "pinnedAngles")
         languageAngles = SettingsService.loadAngleDict(defaults: defaults, key: "languageAngles")
-        translateTileEnabled = defaults.object(forKey: "translateTileEnabled") != nil
-            ? defaults.bool(forKey: "translateTileEnabled")
-            : false
-        translateSourceLocaleId = defaults.string(forKey: "translateSourceLocaleId") ?? "sv_SE"
-        translateAngle = defaults.object(forKey: "translateAngle") as? Double
         dictationInputDeviceUID = defaults.string(forKey: "dictationInputDeviceUID")
     }
 
@@ -134,13 +126,6 @@ final class SettingsService: ObservableObject {
         defaults.set(dictationSilenceTriggerSeconds, forKey: "dictationSilenceTriggerSeconds")
         defaults.set(pinnedAngles, forKey: "pinnedAngles")
         defaults.set(languageAngles, forKey: "languageAngles")
-        defaults.set(translateTileEnabled, forKey: "translateTileEnabled")
-        defaults.set(translateSourceLocaleId, forKey: "translateSourceLocaleId")
-        if let angle = translateAngle {
-            defaults.set(angle, forKey: "translateAngle")
-        } else {
-            defaults.removeObject(forKey: "translateAngle")
-        }
         if let uid = dictationInputDeviceUID {
             defaults.set(uid, forKey: "dictationInputDeviceUID")
         } else {
@@ -150,14 +135,10 @@ final class SettingsService: ObservableObject {
 
     // MARK: - Layout angles
 
-    /// All currently known anchored angles in one flat list (pinned + languages + translate).
+    /// All currently known anchored angles in one flat list (pinned + languages).
     /// Used by the default-placement algorithm when adding a new anchor.
     var allAnchorAngles: [Double] {
-        var all = Array(pinnedAngles.values) + Array(languageAngles.values)
-        if let angle = translateAngle {
-            all.append(angle)
-        }
-        return all
+        Array(pinnedAngles.values) + Array(languageAngles.values)
     }
 
     /// Ensures every currently-pinned bundle id and every configured language
@@ -177,13 +158,6 @@ final class SettingsService: ObservableObject {
         for language in languages where languageAngles[language.id] == nil {
             let angle = RingLayout.nextAnchorAngle(existingAngles: allAnchorAngles)
             languageAngles[language.id] = angle
-            changed = true
-        }
-
-        // Translate tile gets an angle the first time it becomes enabled,
-        // using the same next-empty-arc algorithm as language tiles.
-        if translatePair != nil, translateAngle == nil {
-            translateAngle = RingLayout.nextAnchorAngle(existingAngles: allAnchorAngles)
             changed = true
         }
 
@@ -218,23 +192,6 @@ final class SettingsService: ObservableObject {
         return [dictationLanguage1Id, dictationLanguage2Id]
             .compactMap { $0 }
             .map(DictationLanguage.from(localeId:))
-    }
-
-    /// The currently configured translate pair, or nil when the toggle is
-    /// off, no source has been chosen, or the chosen source is no longer
-    /// enabled in System Settings → Keyboard → Dictation. Target is the
-    /// user's preferred enabled `en_*` variant, falling back to a hardcoded
-    /// `en_US` so the tile still has a flag to render even if no English
-    /// locale is enabled (Whisper does not consult system prefs).
-    var translatePair: TranslatePair? {
-        guard translateTileEnabled else { return nil }
-        let enabled = DictationService.enabledLocales()
-        guard let source = enabled.first(where: { $0.id == translateSourceLocaleId }) else {
-            return nil
-        }
-        let target = enabled.first(where: { $0.id.hasPrefix("en") })
-            ?? DictationLanguage.from(localeId: "en_US")
-        return TranslatePair(source: source, target: target)
     }
 
     var shortcutDisplayString: String {
