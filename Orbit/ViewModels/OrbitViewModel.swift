@@ -59,7 +59,7 @@ final class OrbitViewModel: ObservableObject {
         let pinned = settings.pinnedBundleIds
 
         // Prune/assign angles for current anchored items before layout.
-        settings.ensureAnchorAngles()
+        settings.ensurePreferredAngles()
 
         let allApps = AppService.runningApps(excluding: excluded, pinnedFirst: pinned)
         let pinnedSet = Set(pinned)
@@ -68,16 +68,16 @@ final class OrbitViewModel: ObservableObject {
 
         // Build the anchored (item, angle) list from the user's stored angles.
         var anchored: [(OrbitItem, Double)] = []
-        if settings.dictationEnabled, let angle = settings.dictationAngle {
+        if settings.dictationEnabled, let angle = settings.dictationPreferredAngle {
             anchored.append((.dictation, angle))
         }
         for app in anchoredApps {
-            if let bundleId = app.bundleIdentifier, let angle = settings.pinnedAngles[bundleId] {
+            if let bundleId = app.bundleIdentifier, let angle = settings.pinnedPreferredAngles[bundleId] {
                 anchored.append((.app(app), angle))
             }
         }
 
-        NSLog("[Orbit.layout] show() dictationAngle=\(String(describing: settings.dictationAngle)) pinAngles=\(settings.pinnedAngles)")
+        NSLog("[Orbit.layout] show() dictationPreferredAngle=\(String(describing: settings.dictationPreferredAngle)) pinAngles=\(settings.pinnedPreferredAngles)")
         NSLog("[Orbit.layout] show() anchored=\(anchored.map { "\($0.0.id)@\(Int($0.1))°" })")
 
         positionedItems = RingLayout.compute(

@@ -228,14 +228,14 @@ struct LayoutPreviewView: View {
 
     private func loadAnchors() {
         var result: [Anchor] = []
-        settings.ensureAnchorAngles()
+        settings.ensurePreferredAngles()
 
         if settings.dictationEnabled {
             result.append(
                 Anchor(
                     id: "dictation",
                     kind: .dictation,
-                    angleDegrees: settings.dictationAngle ?? 0,
+                    angleDegrees: settings.dictationPreferredAngle ?? 0,
                     displayName: "Dictation",
                     icon: .dictation
                 )
@@ -247,7 +247,7 @@ struct LayoutPreviewView: View {
                 $0.bundleIdentifier == bundleId
             }) else { continue }
 
-            let angle = settings.pinnedAngles[bundleId] ?? 0
+            let angle = settings.pinnedPreferredAngles[bundleId] ?? 0
             let icon = runningApp.icon ?? NSImage(size: NSSize(width: 32, height: 32))
             result.append(
                 Anchor(
@@ -266,10 +266,10 @@ struct LayoutPreviewView: View {
     private func commit(anchor: Anchor, angle: Double) {
         switch anchor.kind {
         case .dictation:
-            settings.dictationAngle = angle
+            settings.dictationPreferredAngle = angle
         case .pinnedApp:
             let bundleId = String(anchor.id.dropFirst("app:".count))
-            settings.pinnedAngles[bundleId] = angle
+            settings.pinnedPreferredAngles[bundleId] = angle
         }
         settings.save()
         loadAnchors()
