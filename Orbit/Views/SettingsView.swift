@@ -320,6 +320,10 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Divider()
+
+                DictationLanguagesView()
             }
         }
         .formStyle(.grouped)

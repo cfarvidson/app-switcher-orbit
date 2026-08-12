@@ -15,6 +15,7 @@
 		34C80F3712FAF719C2C3D455 /* OverlayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */; };
 		4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE9434D67F596027017522B /* AppService.swift */; };
 		593F29D951061FC9A2C89ADE /* SpeechRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BF5FF75E2668C683B3F6460 /* SpeechRecognitionService.swift */; };
+		5EC97543F630A5BE05CF86F6 /* DictationLanguagesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB924AA865D3B00102D8825 /* DictationLanguagesView.swift */; };
 		76061C98C618303FC707F143 /* RunningApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3785CD7C0BD802AE20E35888 /* RunningApp.swift */; };
 		82624744330FA0A91868E0BD /* DictationLanguageScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B763598E0C62610D896E687 /* DictationLanguageScope.swift */; };
 		873A3B554C2E9B9F43ACDAE0 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = D4131CB423050542CBF672D2 /* FluidAudio */; };
@@ -52,6 +53,7 @@
 		9FEF45BFFE010BCA9A5D3000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
 		ABE9C50DFDD1A720AE7D0CF4 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
+		ADB924AA865D3B00102D8825 /* DictationLanguagesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationLanguagesView.swift; sourceTree = "<group>"; };
 		B59906B22686968DD178A7C6 /* OrbitItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitItem.swift; sourceTree = "<group>"; };
 		BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayPanel.swift; sourceTree = "<group>"; };
 		CBE9434D67F596027017522B /* AppService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppService.swift; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 			isa = PBXGroup;
 			children = (
 				4958B2634D8439242ED1028F /* AppIconView.swift */,
+				ADB924AA865D3B00102D8825 /* DictationLanguagesView.swift */,
 				55310747335F2AE5F09BFEDC /* DictationTileView.swift */,
 				5F52A45A2D15CB617E0E7BF7 /* LayoutPreviewView.swift */,
 				15B0E64515D2F209A1ACF98A /* OrbitView.swift */,
@@ -241,6 +244,7 @@
 				4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */,
 				0F2835DDB7523577F8219883 /* AudioInputDeviceService.swift in Sources */,
 				82624744330FA0A91868E0BD /* DictationLanguageScope.swift in Sources */,
+				5EC97543F630A5BE05CF86F6 /* DictationLanguagesView.swift in Sources */,
 				A329264775F189B4E845781A /* DictationTileView.swift in Sources */,
 				2B99F71FE4018A4F90193B71 /* EscapeKeyTap.swift in Sources */,
 				2A49C7AB49AF925F710395B7 /* HotkeyService.swift in Sources */,
