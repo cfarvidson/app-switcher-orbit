@@ -26,7 +26,8 @@ Orbit/
 ├── Models/
 │   ├── RunningApp.swift        # Wraps NSRunningApplication
 │   ├── OrbitItem.swift         # Sum type: .app(RunningApp) | .dictation
-│   └── RingLayout.swift        # Pure-data ring placement (anchors + gap filling)
+│   ├── RingLayout.swift        # Pure-data ring placement (evenly spaced slots + preferred directions)
+│   └── DictationLanguageScope.swift # Maps selected languages onto FluidAudio's script hint
 ├── Services/
 │   ├── AppService.swift             # Fetches running GUI apps
 │   ├── AudioInputDeviceService.swift # CoreAudio input device enumeration
@@ -43,6 +44,7 @@ Orbit/
 │   ├── OrbitView.swift         # SwiftUI radial layout with hover tracking
 │   ├── AppIconView.swift       # Single app icon with selection glow
 │   ├── DictationTileView.swift # Dictation tile (mic.fill symbol)
+│   ├── DictationLanguagesView.swift # Language picker, grouped by writing script
 │   ├── LayoutPreviewView.swift # Live preview of the resolved ring; drag pinned apps to set a preferred direction
 │   ├── SettingsView.swift      # Tabbed settings window
 │   └── ShortcutRecorderView.swift  # Keyboard shortcut capture
@@ -241,12 +243,15 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 | pinnedPreferredAngles          | `[String: Double]`                     | `[:]`              | `pinnedAngles`                   |
 | dictationPreferredAngle        | `Double?`                              | `nil`              | `dictationAngle`                 |
 | dictationInputDeviceUID        | `String?`                              | `nil`              | `dictationInputDeviceUID`        |
+| dictationLanguages             | `Set<String>`                          | seeded from system | `dictationLanguages`             |
 
 The `pinnedAngles` / `dictationAngle` UserDefaults keys deliberately keep their pre-rename names even though the Swift properties are now `pinnedPreferredAngles` / `dictationPreferredAngle`. Renaming the keys to match would mean existing installs read back empty defaults on upgrade and silently lose every user's saved layout. Do not "fix" this mismatch.
 
 All properties are `@Published`. The `save()` method writes all properties to UserDefaults; the two optional keys (`dictationAngle`, `dictationInputDeviceUID`) are removed from the domain rather than written when they are `nil`.
 
 `dictationEnabled` defaults to `false` so existing users do not get a surprise tile after upgrading. `dictationPreferredAngle` is assigned by `ensurePreferredAngles()` the first time dictation is enabled and is preserved when the tile is toggled off - re-enabling restores the same preferred direction. `pinnedPreferredAngles` maps bundle id to a preferred direction in degrees clockwise from 12 o'clock - a direction the ring solver aims for, not a position the item is guaranteed to occupy; `RingLayout.compute` resolves it onto whichever evenly-spaced slot sits closest. It is read back through a manual `NSNumber`/`Double` walk because `dictionary(forKey:) as? [String: Double]` does not round-trip reliably through UserDefaults. `dictationInputDeviceUID` stores the CoreAudio `kAudioDevicePropertyDeviceUID` string (e.g. `"BuiltInMicrophoneDevice"`); `nil` means follow the system default input device.
+
+`dictationLanguages` holds ISO codes matching FluidAudio's `Language.rawValue` (`"en"`, `"sv"`, ...). Its absence and its emptiness mean different things, and the distinction is load-bearing: a **missing key** means the app has never run, so `seedLanguagesFromSystem()` preselects whatever `Locale.preferredLanguages` reports that Parakeet also supports (comparing on the language subtag, so `sv-SE` matches `sv`) and immediately writes the result - even when that result is empty, so the seeding is not retried on the next launch. A **present but empty array** means the user deliberately cleared the selection and must be left alone. Re-seeding an empty stored value would make it impossible to turn language filtering off at all.
 
 ### Layout preferences
 
@@ -287,9 +292,9 @@ Public API:
 
 1. `AVAudioEngine` taps the input node and runs samples through an `AVAudioConverter` to 16 kHz mono Float32 (the format Parakeet expects).
 2. Each tap callback computes RMS amplitude over the converted samples for a cheap voice-activity detector. Above the threshold = speech, below = silence.
-3. After `SettingsService.dictationSilenceTriggerSeconds` of continuous silence following speech (and at least `minSpeechSeconds` of speech in the buffer), or after a hard `maxBufferSeconds` cap, the buffered audio is handed to `AsrManager.transcribe(_:decoderState:)`. Each flush allocates a **fresh** `TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)`: a flush is one complete utterance, so there is no decoder continuity to carry across calls. No language argument is passed - the model detects it.
+3. After `SettingsService.dictationSilenceTriggerSeconds` of continuous silence following speech (and at least `minSpeechSeconds` of speech in the buffer), or after a hard `maxBufferSeconds` cap, the buffered audio is handed to `AsrManager.transcribe(_:decoderState:language:)`. Each flush allocates a **fresh** `TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)`: a flush is one complete utterance, so there is no decoder continuity to carry across calls. The `language:` argument is the script hint derived from the user's selected languages - see **Language scope** below.
 4. The resulting transcript is filtered (a transcript wrapped entirely in `[...]` or `(...)` is dropped, and both the ASCII `...` and the Unicode `…` ellipsis forms are stripped because the model emits them for mid-sentence pauses, then any resulting double spaces are collapsed to single spaces and the result re-trimmed) and injected into the frontmost app via the **clipboard-paste path** described below. Consecutive utterances within a session are joined with a single space.
-5. ESC cancels the session (discards the buffer). Clicking the floating indicator, re-triggering Orbit, or hitting the 60 s hard cap commits the session - `stop(reason:flushBuffer:)` runs a final transcription on whatever's still in the buffer before tearing down, so the natural "speak then press hotkey to stop" flow doesn't lose the last utterance. The final flush is skipped when a VAD-triggered transcription is already in flight (`transcribing == true`): that in-flight task still injects its own result, and the few hundred ms captured after it was dispatched would only transcribe as a broken fragment.
+5. ESC cancels the session (discards the buffer). Choosing "Stop Dictation" in the menu bar, re-triggering Orbit, or hitting the 60 s hard cap commits the session - `stop(reason:flushBuffer:)` runs a final transcription on whatever's still in the buffer before tearing down, so the natural "speak then press hotkey to stop" flow doesn't lose the last utterance. The final flush is skipped when a VAD-triggered transcription is already in flight (`transcribing == true`): that in-flight task still injects its own result, and the few hundred ms captured after it was dispatched would only transcribe as a broken fragment.
 
 ### Text injection (clipboard paste)
 
@@ -335,6 +340,27 @@ Versions before 2.0.0 ran WhisperKit and cached its models under `~/Documents/hu
 ### Permissions
 
 `ensurePermissions` uses `AVCaptureDevice.authorizationStatus(for: .audio)` and `AVCaptureDevice.requestAccess(for: .audio)` for the microphone. `Speech.framework` is not used, so `NSSpeechRecognitionUsageDescription` is intentionally absent from `Info.plist`. Accessibility is also required, for both the global hotkey (see `## HotkeyService`), text injection (see `### Text injection` above), and now Escape interception during a session (see `### Escape handling` below) - Orbit already requests Accessibility on launch (`## AppDelegate`), so dictation adds no new prompt.
+
+### Language scope
+
+Parakeet detects the spoken language on its own across 25+ European languages, and it occasionally gets it wrong in a way that is worse than a mistranscription: Swedish speech decoded as Russian arrives as Cyrillic text pasted into whatever the user was typing in. `dictationLanguages` lets the user narrow it.
+
+The mechanism is **script-level, not language-level**, and that constrains everything else. `AsrManager.transcribe` accepts a `language: Language?` hint; `TokenLanguageFilter` maps FluidAudio's `Language` enum onto three `Script` cases (`.latin`, `.cyrillic`, `.greek`) and skips top-K decoder tokens whose script does not match. "English and Swedish but not German" is not expressible. The hint is a v3-only feature and is silently ignored on other model variants; Orbit only ships v3.
+
+One further subtlety drives the mapping: `TdtDecoderV3` additionally applies an English blocklist whenever the hint is a Latin language **other than** English, replacing blocklisted English tokens with the best non-English Latin candidate. Passing `.swedish` would therefore actively suppress English words, which is wrong for a user who code-switches mid-sentence. English wins the tie whenever it is selected.
+
+`DictationLanguageScope.hint(for:)` (`Orbit/Models/DictationLanguageScope.swift`) is a pure, total function implementing the rules in order:
+
+1. Map each code through `Language(rawValue:)`, discarding unknown codes. Empty result returns `nil` - no filtering.
+2. The selection spans more than one `Script`: return `nil`. No hint can express a mixed-script selection, and silently picking one would discard half the user's answer.
+3. All `.latin` and the set contains `.english`: return `.english`. Latin filtering, no English blocklist.
+4. All `.latin` without `.english`: return the selected language with the lowest `rawValue`. The English blocklist does apply here, which is correct precisely because the user did not select English.
+5. All `.cyrillic`: return the selected language with the lowest `rawValue`. The blocklist is Latin-only, so the choice within the script is immaterial; lowest `rawValue` is for determinism.
+6. All `.greek`: return `.greek`.
+
+`DictationLanguageScope.supportedCodes` exposes every code Parakeet supports, derived from `Language.allCases` rather than hardcoded, and is what `SettingsService.seedLanguagesFromSystem()` filters against.
+
+The hint is computed at each of the two transcribe call sites - the final flush in `stop(reason:flushBuffer:)` and the mid-session flush in `flushAndTranscribe()` - rather than cached per session, so a settings change takes effect on the next utterance instead of the next session. `flushAndTranscribe` logs the resolved hint as `[Orbit.speech] language hint=...`, which is the only observable evidence the wiring is live.
 
 ### Escape handling
 
@@ -605,6 +631,7 @@ There are no language pickers and no model picker: Parakeet detects the language
   - "Refresh list" button re-enumerates devices and updates `availableInputDevices` state.
   - Caption explains that this device is used for dictation and that "System Default" follows the macOS audio input setting.
   - Below a `Divider`, a **Pause tolerance** slider bound to `settings.dictationSilenceTriggerSeconds`, range 0.5-3.0 in 0.1 steps, with the current value shown as e.g. "0.8s" in monospaced digits. Caption explains that it is how long Orbit waits in silence before transcribing, and that higher values let the user pause mid-sentence without fragmenting the output.
+  - Below another `Divider`, `DictationLanguagesView` (`Orbit/Views/DictationLanguagesView.swift`). A `DisclosureGroup` collapsed by default, labelled "Languages", with the current selection summarised on the row as comma-separated localized names, or "None (no filtering)" when empty. Expanded, it lists every `Language` case as a `.checkbox` `Toggle` in a `LazyVGrid` (`GridItem(.adaptive(minimum: 130))`), grouped under LATIN / CYRILLIC / GREEK headings. The grouping is the explanation, not decoration: it is what makes it obvious why selecting across two headings cannot be filtered. Groups are built from `Language.script` rather than a hardcoded list, so a language added upstream cannot silently vanish from the picker, and display names come from `Locale.current.localizedString(forLanguageCode:)` so there is no 28-entry name table to keep in sync. When the selection spans more than one script an orange caption appears - "Mixed alphabets selected - filtering is off. Parakeet may emit any script." - because the control must not look active while doing nothing. Every toggle calls `settings.save()`.
 - Uses `.formStyle(.grouped)`. The view holds an `@ObservedObject var speech = SpeechRecognitionService.shared` so model status updates re-render the status row live.
 
 ### Layout Tab
