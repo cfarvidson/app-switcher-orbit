@@ -30,10 +30,12 @@ Orbit/
 ├── Services/
 │   ├── AppService.swift             # Fetches running GUI apps
 │   ├── AudioInputDeviceService.swift # CoreAudio input device enumeration
+│   ├── EscapeKeyTap.swift    # CGEvent tap that swallows ESC during a dictation session
 │   ├── HotkeyService.swift          # Carbon global hotkey + mouse button monitors
 │   ├── OverlayPanel.swift           # Floating transparent NSPanel
 │   ├── SettingsService.swift        # UserDefaults persistence (singleton)
 │   ├── SpeechRecognitionService.swift # In-process Parakeet pipeline (audio capture, VAD, transcription, text injection)
+│   ├── StatusItemController.swift # Menu bar status item: icon states, menu, dictation stop command
 │   └── UpdateService.swift          # GitHub release update checker
 ├── ViewModels/
 │   └── OrbitViewModel.swift    # Selection logic, angle math, event monitors
@@ -41,8 +43,7 @@ Orbit/
 │   ├── OrbitView.swift         # SwiftUI radial layout with hover tracking
 │   ├── AppIconView.swift       # Single app icon with selection glow
 │   ├── DictationTileView.swift # Dictation tile (mic.fill symbol)
-│   ├── LayoutPreviewView.swift # Drag-to-position preview for anchored items
-│   ├── RecordingIndicatorPanel.swift # Floating "Listening…" panel + its SwiftUI view
+│   ├── LayoutPreviewView.swift # Live preview of the resolved ring; drag pinned apps to set a preferred direction
 │   ├── SettingsView.swift      # Tabbed settings window
 │   └── ShortcutRecorderView.swift  # Keyboard shortcut capture
 └── Resources/
@@ -57,18 +58,30 @@ Orbit/
 
 ## AppDelegate
 
+The menu bar status item itself is owned by `StatusItemController`, not `AppDelegate`. `AppDelegate` retains only the menu actions the controller's items target via the responder chain (Settings, About, Check for Updates, Quit) plus the ones it wires up directly (opening the update URL).
+
 Responsibilities:
 
 1. **Accessibility prompt** — on launch, call `AXIsProcessTrustedWithOptions` with the prompt option to request Accessibility permissions. Also detects the **stale-TCC-entry** case (after every rebuild for ad-hoc-signed apps): if `AXIsProcessTrusted()` returns false even though the entry exists in System Settings, shows a custom warning alert with an "Open Privacy Settings…" button explaining the user needs to toggle Orbit off and back on. Without this check the rebuild silently breaks the global hotkey suppression and the dictation paste path because `CGEvent.post` is filtered while the Carbon hotkey keeps working
-2. **Menu bar status item** — `NSStatusBar.system.statusItem` with the SF Symbol `circle.dotted`
-   - Menu items: Settings (Cmd+,), About Orbit, Quit Orbit (Cmd+Q)
+2. **Menu bar status item** — constructs a `StatusItemController`, passing it the initial activation and input-mode display strings. The status item no longer shows a single fixed symbol; it maps `SpeechRecognitionService.DictationState` to an icon treatment:
+
+   | state        | SF Symbol       | treatment                                                        |
+   | ------------ | --------------- | ---------------------------------------------------------------- |
+   | idle         | `circle.dotted` | template, full opacity, static                                   |
+   | loading      | `circle.dotted` | template, 45% alpha, 1.6 s breathe                               |
+   | starting     | `waveform`      | template, 45% alpha, static                                      |
+   | listening    | `waveform`      | `NSColor.controlAccentColor`, 1.2 s breathe between 100% and 55% |
+   | transcribing | `ellipsis`      | template, full opacity, static                                   |
+   - Menu items: Settings (Cmd+,), Check for Updates…, About Orbit, Quit Orbit (Cmd+Q)
    - Disabled info items show current activation method and input mode
    - "Update Available" item inserted at top when a newer GitHub release is found
+   - See `## SpeechRecognitionService` → `### Menu bar feedback` for the full icon and menu treatment
+
 3. **Hotkey setup** — create `HotkeyService` with a callback that calls `toggleOrbit()`
 4. **Overlay panel** — create a single `OverlayPanel` hosting the `OrbitView`
 5. **Settings observation** — use Combine to observe changes to trigger settings (debounced 100ms) and re-register the hotkey
 6. **Settings window** - opened as a plain `NSWindow` (520x640) with `NSHostingView<SettingsView>`, not SwiftUI's Settings scene
-7. **Toggle logic** — if visible, dismiss; if hidden, get `NSEvent.mouseLocation`, call `viewModel.show()`, then `overlayPanel.showOverlay(at:size:)`
+7. **Toggle logic** — if visible, dismiss; if hidden, get `NSEvent.mouseLocation`, call `viewModel.show()`, then `overlayPanel.showOverlay(at:size:)`. If dictation is currently recording, the trigger stops and commits the session instead of opening the ring.
 8. **Update check** — on launch, calls `UpdateService.checkForUpdate` to check for newer GitHub releases
 
 ## RunningApp Model
@@ -109,14 +122,19 @@ struct Positioned: Equatable {
     let isAnchored: Bool
 }
 
-static func compute(anchoredItems: [(item: OrbitItem, angleDegrees: Double)],
-                    nonPinned: [OrbitItem]) -> [Positioned]
+static func compute(preferred: [(item: OrbitItem, preferredAngle: Double)],
+                    others: [OrbitItem]) -> [Positioned]
 static func nextAnchorAngle(existingAngles: [Double]) -> Double
 ```
 
-- `compute` places anchored items (pinned apps and the dictation tile) at their stored angles, sorted clockwise, then distributes the non-pinned running apps across the gaps between anchors proportionally to each gap's arc. Fractional leftovers are handed to the gaps with the largest remainders so the placed count always matches the input count. Items inside a gap are evenly spaced with equal margins at both ends so they do not collide with the anchors.
-- With no anchors at all, `compute` falls back to even distribution over 360°.
-- `nextAnchorAngle` returns the angle for a newly anchored item: `0` when there are no anchors, the point opposite the single existing anchor when there is one, otherwise the midpoint of the largest empty arc. Duplicate angles in the input are tolerated and contribute a zero-width gap, never a full circle; if every anchor sits at the same angle there is no arc to measure and the result is the opposite point. This matters because `compute` has no duplicate handling: two anchors sharing an angle render stacked on the same point, with the later one taking the hit-testing, so an anchor placed on top of another looks and behaves like the wrong tile.
+The ring is always evenly divided: `n` items (preferred plus others combined) means `n` slots, slot `i` at `i * 360/n` degrees, slot 0 always at twelve o'clock. Pinned apps and the dictation tile carry a _preferred direction_, not a fixed position:
+
+- Every preferred item's direction is normalized and mapped to its ideal slot (`round(angle / step) % n`), and a residual - how far the preference sits from that slot. Claims are ranked by ascending residual (ties broken by normalized angle) so the closest claim is always honored first, rather than depending on the order the caller happened to list them in.
+- Each claim, in ranked order, takes its ideal slot if free. If occupied, `firstFreeSlot` walks outward from the ideal slot alternating clockwise and counter-clockwise (offset 1 clockwise, offset 1 counter-clockwise, offset 2 clockwise, …) until it finds an empty one. This always succeeds because preferred items are themselves counted in the slot total, so demand never exceeds supply. Two preferences that resolve to the same ideal slot land on adjacent slots instead of stacking.
+- Every slot left unclaimed after all preferred items are placed is filled with `others` in the order given.
+- With zero items, `compute` returns an empty array.
+
+`nextAnchorAngle` returns the angle for a newly anchored item: `0` when there are no anchors, the point opposite the single existing anchor when there is one, otherwise the midpoint of the largest empty arc. Duplicate angles in the input are tolerated and contribute a zero-width gap, never a full circle; if every anchor sits at the same angle there is no arc to measure and the result is the opposite point. `compute` now separates duplicate preferences onto adjacent slots via the outward search above, so the stacking failure this function used to guard against - two anchors sharing an angle rendering on the same point, with the later one taking the hit-testing - can no longer happen.
 
 ## AppService
 
@@ -220,19 +238,21 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 | excludedBundleIds              | `Set<String>`                          | `[]`               | `excludedBundleIds`              |
 | dictationEnabled               | `Bool`                                 | `false`            | `dictationEnabled`               |
 | dictationSilenceTriggerSeconds | `Double`                               | `0.8`              | `dictationSilenceTriggerSeconds` |
-| pinnedAngles                   | `[String: Double]`                     | `[:]`              | `pinnedAngles`                   |
-| dictationAngle                 | `Double?`                              | `nil`              | `dictationAngle`                 |
+| pinnedPreferredAngles          | `[String: Double]`                     | `[:]`              | `pinnedAngles`                   |
+| dictationPreferredAngle        | `Double?`                              | `nil`              | `dictationAngle`                 |
 | dictationInputDeviceUID        | `String?`                              | `nil`              | `dictationInputDeviceUID`        |
+
+The `pinnedAngles` / `dictationAngle` UserDefaults keys deliberately keep their pre-rename names even though the Swift properties are now `pinnedPreferredAngles` / `dictationPreferredAngle`. Renaming the keys to match would mean existing installs read back empty defaults on upgrade and silently lose every user's saved layout. Do not "fix" this mismatch.
 
 All properties are `@Published`. The `save()` method writes all properties to UserDefaults; the two optional keys (`dictationAngle`, `dictationInputDeviceUID`) are removed from the domain rather than written when they are `nil`.
 
-`dictationEnabled` defaults to `false` so existing users do not get a surprise tile after upgrading. `dictationAngle` is assigned by `ensureAnchorAngles()` the first time dictation is enabled and is preserved when the tile is toggled off - re-enabling restores the same ring slot. `pinnedAngles` maps bundle id to a clockwise-from-12-o'clock angle in degrees; it is read back through a manual `NSNumber`/`Double` walk because `dictionary(forKey:) as? [String: Double]` does not round-trip reliably through UserDefaults. `dictationInputDeviceUID` stores the CoreAudio `kAudioDevicePropertyDeviceUID` string (e.g. `"BuiltInMicrophoneDevice"`); `nil` means follow the system default input device.
+`dictationEnabled` defaults to `false` so existing users do not get a surprise tile after upgrading. `dictationPreferredAngle` is assigned by `ensurePreferredAngles()` the first time dictation is enabled and is preserved when the tile is toggled off - re-enabling restores the same preferred direction. `pinnedPreferredAngles` maps bundle id to a preferred direction in degrees clockwise from 12 o'clock - a direction the ring solver aims for, not a position the item is guaranteed to occupy; `RingLayout.compute` resolves it onto whichever evenly-spaced slot sits closest. It is read back through a manual `NSNumber`/`Double` walk because `dictionary(forKey:) as? [String: Double]` does not round-trip reliably through UserDefaults. `dictationInputDeviceUID` stores the CoreAudio `kAudioDevicePropertyDeviceUID` string (e.g. `"BuiltInMicrophoneDevice"`); `nil` means follow the system default input device.
 
-### Layout angles
+### Layout preferences
 
-- `allAnchorAngles: [Double]` - every stored anchor angle (pinned apps plus the dictation tile) in one flat list, used as the input to `RingLayout.nextAnchorAngle`.
-- `ensureAnchorAngles()` - assigns an angle to every pinned bundle id that lacks one and to the dictation tile when `dictationEnabled` is true, prunes angles for bundle ids that are no longer pinned, and saves if anything changed. Called at the start of every `OrbitViewModel.show()` and when the dictation toggle is switched on.
-- `resetLayoutAngles()` - clears `pinnedAngles` and `dictationAngle` and saves; the next `ensureAnchorAngles()` reassigns defaults.
+- `allPreferredAngles: [Double]` - every stored preferred angle (pinned apps plus the dictation tile) in one flat list, used as the input to `RingLayout.nextAnchorAngle`.
+- `ensurePreferredAngles()` - assigns a preferred angle to every pinned bundle id that lacks one and to the dictation tile when `dictationEnabled` is true, prunes angles for bundle ids that are no longer pinned, and saves if anything changed. Called at the start of every `OrbitViewModel.show()` and when the dictation toggle is switched on.
+- `resetLayoutAngles()` - clears `pinnedPreferredAngles` and `dictationPreferredAngle` and saves; the next `ensurePreferredAngles()` reassigns defaults.
 
 ### Computed Properties
 
@@ -314,7 +334,17 @@ Versions before 2.0.0 ran WhisperKit and cached its models under `~/Documents/hu
 
 ### Permissions
 
-`ensurePermissions` uses `AVCaptureDevice.authorizationStatus(for: .audio)` and `AVCaptureDevice.requestAccess(for: .audio)`. Only the microphone permission is required — `Speech.framework` is not used, so `NSSpeechRecognitionUsageDescription` is intentionally absent from `Info.plist`.
+`ensurePermissions` uses `AVCaptureDevice.authorizationStatus(for: .audio)` and `AVCaptureDevice.requestAccess(for: .audio)` for the microphone. `Speech.framework` is not used, so `NSSpeechRecognitionUsageDescription` is intentionally absent from `Info.plist`. Accessibility is also required, for both the global hotkey (see `## HotkeyService`), text injection (see `### Text injection` above), and now Escape interception during a session (see `### Escape handling` below) - Orbit already requests Accessibility on launch (`## AppDelegate`), so dictation adds no new prompt.
+
+### Escape handling
+
+An `EscapeKeyTap` (`Orbit/Services/EscapeKeyTap.swift`) is installed for the duration of a session via `installEscMonitor()` and torn down in `stop(reason:flushBuffer:)`. It wraps a `CGEvent` tap (`CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, …)`) that is the only way to _consume_ a key press out of another app's event stream - `NSEvent.addGlobalMonitorForEvents` can observe but never swallow.
+
+- The tap's event mask covers both `keyDown` and `keyUp` for keycode 53 (Escape). Both are swallowed so an app that acts on key-up never sees a release with no matching press.
+- On `keyDown` for Escape, the tap hops to the main queue asynchronously and calls its `onEscape` closure, which calls `stop(reason: "esc", flushBuffer: false)` - Escape **cancels**, it does not commit: the buffer is discarded rather than transcribed, matching macOS's own Dictation. Every other way of ending a session (re-triggering Orbit, "Stop Dictation" in the menu bar, the 60 s hard cap) commits by running a final flush.
+- Returning `nil` from the tap callback for a matched Escape event is what swallows it; every other event (including the `keyUp` half of Escape) passes through via `Unmanaged.passUnretained(event)`.
+- The callback also watches for `.tapDisabledByTimeout` and `.tapDisabledByUserInput` - macOS disables a tap that responds too slowly or when input state resets - and re-enables the tap immediately via `CGEvent.tapEnable(tap:enable:)` rather than silently going deaf for the rest of the session.
+- Creating the tap requires Accessibility permission. `EscapeKeyTap.start()` returns `false` when `CGEvent.tapCreate` fails, and `installEscMonitor()` falls back to an observe-only `NSEvent.addGlobalMonitorForEvents(matching: .keyDown)` global monitor. In that fallback, Escape still cancels the session, but it is not consumed - it also reaches the frontmost app, exactly as before this feature existed.
 
 ### Error surfacing
 
@@ -330,21 +360,33 @@ Versions before 2.0.0 ran WhisperKit and cached its models under `~/Documents/hu
 
 `startInternal` is guarded by a 0.75 s `startLockout` and a `starting` re-entrancy flag so back-to-back triggers (e.g. a double-click) don't pile up sessions. If a session is already running, `stop(reason:)` is called first; the toggle handler in `AppDelegate.toggleOrbit` also calls `stop` when the user re-presses the global trigger while dictation is active.
 
-### Floating indicator
+### Menu bar feedback
 
-`RecordingIndicatorPanel` is a borderless non-activating `NSPanel` (220×64) shown near the cursor while a session is preparing or recording. `show(state:onStopTapped:)` builds it; `updateState(_:)` mutates the observable model in place so the panel can change state without rebuilding the view tree. Click anywhere on the panel to stop the session.
+There is no floating panel. Dictation feedback lives entirely in the menu bar icon, owned by `StatusItemController` (see `## AppDelegate` for the icon/treatment table).
 
-Three states, each with a status line and a hint line:
+`SpeechRecognitionService` publishes `@Published private(set) var dictationState: DictationState`:
 
-| State               | Status       | Hint                                         | Icon                     |
-| ------------------- | ------------ | -------------------------------------------- | ------------------------ |
-| `.loading(message)` | the message  | `"First-time download \u{2014} please wait"` | `arrow.down.circle.fill` |
-| `.starting`         | "Starting…"  | "Almost ready…"                              | `mic.fill`               |
-| `.listening`        | "Listening…" | "Click or press ESC to stop"                 | `mic.fill`               |
+```swift
+enum DictationState: Equatable {
+    case idle
+    case loading(message: String)
+    case starting
+    case listening
+    case transcribing
+}
+```
 
-`.loading` and `.starting` pulse a gray dot; `.listening` pulses a red one. The panel carries no language or flag indication: a session has no language.
+- `.idle` - no session active.
+- `.loading(message:)` - the Parakeet model is being loaded into memory for the first time in this run; `message` is shown as the disabled menu status line (e.g. `"Loading model…"`).
+- `.starting` - the audio engine has started but hasn't delivered its first buffer yet (`AVAudioEngine.start()` returns 100-300 ms before capture actually begins).
+- `.listening` - actively capturing. This is the state for the entire duration of the session, including every VAD-triggered mid-session flush - `.transcribing` is deliberately **not** used there. Flipping the icon on every natural pause between utterances would strobe it; the icon should read "session is live," not "a network call is in flight right now."
+- `.transcribing` - covers only the post-stop final flush that `stop(reason:flushBuffer:)` runs on whatever's left in the buffer. It is the last state before returning to `.idle`.
 
-`.starting` exists because `AVAudioEngine.start()` returns 100-300 ms before the first buffer is actually delivered. The indicator holds `.starting` until `processAudioBuffer` sees its first session-mode buffer, then flips to `.listening`. A session promoted from warmup skips `.starting` entirely, because audio has been flowing since the ring opened.
+`StatusItemController` observes `dictationState` via Combine (`removeDuplicates()`, delivered on the main run loop) and maps each case to an `IconStyle` (SF Symbol, tinted or not, base alpha, optional breathe period) - the table is in `## AppDelegate`. The accent used for `.listening` is `NSColor.controlAccentColor`, applied via `button.contentTintColor`; every other state clears `contentTintColor` and relies on the image being a template (`isTemplate = true`) so it renders in the system's default menu bar color.
+
+The breathe animation is a 30 fps (`1/30 s` tick) `Timer` added to `RunLoop.main` in `.common` mode - `.common` so it keeps ticking while a menu is open, which the default run loop mode would pause. Each tick advances a phase accumulator and sets `button.alphaValue` to oscillate between `baseAlpha` and 55% of `baseAlpha` on a sine wave. The timer is invalidated (and alpha reset to the state's static value) on every transition to a state with no `breathePeriod`.
+
+While a session is live (any state but `.idle`), `StatusItemController` inserts a disabled status line plus a "Stop Dictation" command at the top of the menu, above a separator, and removes both when the state returns to `.idle`. This is the replacement for the old panel's click-to-stop; the status line text is `.loading`'s message, `"Starting…"`, `"Listening…"`, or `"Transcribing…"` depending on state. "Stop Dictation" calls `SpeechRecognitionService.shared.stop(reason:)`.
 
 ### Notification
 
@@ -413,10 +455,10 @@ Geometry is snapshotted once per show to avoid reading SettingsService on every 
 
 On each `show()`:
 
-1. `SettingsService.ensureAnchorAngles()` runs first, so every pinned app and the dictation tile have an angle before layout.
-2. The anchored list is built as `(.dictation, dictationAngle)` when `dictationEnabled` and an angle exists, then one entry per pinned app that has a stored angle.
-3. `AppService.runningApps(excluding:pinnedFirst:)` is split into pinned and non-pinned; the non-pinned apps are the gap fillers.
-4. `RingLayout.compute(anchoredItems:nonPinned:)` returns `positionedItems`, sorted clockwise from 12 o'clock.
+1. `SettingsService.ensurePreferredAngles()` runs first, so every pinned app and the dictation tile have a preferred angle before layout.
+2. A `preferred` list of `(item, preferredAngle)` directions is built: `(.dictation, dictationPreferredAngle)` when `dictationEnabled` and a preference exists, then one entry per pinned app that has a stored preference.
+3. `AppService.runningApps(excluding:pinnedFirst:)` is split into pinned and non-pinned; the non-pinned apps become `others`.
+4. `RingLayout.compute(preferred:others:)` resolves every preference onto the evenly spaced slot nearest it, fills the remaining slots with `others`, and returns `positionedItems` sorted clockwise from 12 o'clock. See `## RingLayout` for the slot-resolution algorithm.
 5. `warmupAudioCapture()` is called when `dictationEnabled` is true.
 
 ### Angle & Position Math
@@ -509,7 +551,7 @@ Displays the single dictation tile. Visually mirrors `AppIconView` so both item 
 
 - `RoundedRectangle(cornerRadius: 12)` filled with `.ultraThinMaterial`
 - `Image(systemName: "mic.fill")` centered, at `effectiveSize * 0.5`, `.medium` weight, `.primary` foreground. No flag and no locale badge: the tile is language-agnostic
-- Same `effectiveSize` rule as `AppIconView` (`isAnchored ? size * 1.2 : size`). The tile is always anchored in the real ring; the `isAnchored` parameter exists so `LayoutPreviewView` can render it unanchored
+- Same `effectiveSize` rule as `AppIconView` (`isAnchored ? size * 1.2 : size`). The tile is always anchored in the real ring, so `isAnchored` defaults to `true` and only `OrbitView` instantiates this view. `LayoutPreviewView` no longer builds a `DictationTileView` at all - it renders its own inline tile (a material rounded rect with `mic.fill`) sized and dimmed directly from `RingLayout.Positioned.isAnchored`, the same way it draws app icons inline rather than through `AppIconView`, so its preview matches `RingLayout.compute`'s output exactly without depending on the ring's own SwiftUI views
 - Same selection treatment as `AppIconView`: accent glow + stroke + `scaleEffect(1.25)`
 - Animation: `.easeInOut(0.12)` on `isSelected`
 
@@ -546,7 +588,7 @@ A `TabView` with five tabs (Shortcut, Pinned, Apps, Dictation, Layout). The view
 
 There are no language pickers and no model picker: Parakeet detects the language itself and Orbit ships one model.
 
-- **Master enable toggle**: "Show the dictation tile in the ring" - bound to `SettingsService.dictationEnabled`. Off by default. Caption explains that selecting the tile starts on-device dictation, that the spoken language is detected automatically, and that no audio leaves the Mac. Switching it on calls `SettingsService.ensureAnchorAngles()` so the tile has a ring slot the next time the ring opens.
+- **Master enable toggle**: "Show the dictation tile in the ring" - bound to `SettingsService.dictationEnabled`. Off by default. Caption explains that selecting the tile starts on-device dictation, that the spoken language is detected automatically, and that no audio leaves the Mac. Switching it on calls `SettingsService.ensurePreferredAngles()` so the tile has a preferred direction the next time the ring opens.
 - **Speech model section** (visible only when enabled):
   - Static name row showing `SpeechRecognitionService.modelDisplayName`, with a caption that it runs on-device via CoreML and covers 25 European languages with automatic language detection, punctuation and capitalization.
   - Status row driven by `SpeechRecognitionService.modelStatus`:
@@ -566,7 +608,13 @@ There are no language pickers and no model picker: Parakeet detects the language
 
 ### Layout Tab
 
-Hosts `LayoutPreviewView`, a 280pt circular preview of the ring showing every anchored item at 44pt (pinned apps by their `NSImage` icon, the dictation tile as a material rounded rect with `mic.fill`). Each anchor can be dragged around the circle; on release the angle snaps to the nearest 15° increment, and if that slot is within 5° of another anchor the search walks outward in 15° steps, alternating clockwise and counter-clockwise, until a free slot is found. The result is written back to `SettingsService.pinnedAngles` or `SettingsService.dictationAngle`. A "Reset to default layout" button calls `SettingsService.resetLayoutAngles()`. When nothing is anchored the preview shows "No anchored items yet. Pin an app or enable dictation to see them here."
+Hosts `LayoutPreviewView`, a 280pt circular live simulation of the real ring - it calls the exact same `RingLayout.compute(preferred:others:)` the ring uses, so what's shown here is what the ring will actually do, not an abstract approximation.
+
+- **Every running app is shown**, not just the pinned ones. Pinned apps and the dictation tile are drawn at 44pt, full opacity, and are draggable. Every other running app is drawn at 26pt, 35% opacity, and is not hit-testable (`allowsHitTesting(false)`) - it fills whatever slot is left over, exactly like it would in the real ring.
+- **Free drag, no snapping.** Dragging a pinned item or the dictation tile follows the cursor continuously - there is no angle snapping, no collision threshold, and no outward search step; none of that exists anymore. The solver in `RingLayout.compute` always quantizes to evenly spaced slots regardless of the exact drag angle, so snapping the drag itself would be redundant.
+- While dragging, a hairline `Path` from the center shows the raw pointer direction, and a small accent-colored dot marks the slot the item will actually resolve to - so the difference between "where you dragged it" and "which slot it will claim" is visible live.
+- On drag end, the raw angle (not the resolved slot) is written back to `SettingsService.pinnedPreferredAngles[bundleId]` or `SettingsService.dictationPreferredAngle` - it's a preference, not a position, so the exact value matters for future re-resolution as the running-app set changes.
+- A "Reset to default layout" button calls `SettingsService.resetLayoutAngles()`; it's disabled when there is nothing pinned and dictation is off. When nothing is anchored the preview shows "Nothing pinned yet.\nPin an app or enable dictation to place it here." over the (all-dimmed) ring.
 
 ### AppInfo Helper
 
