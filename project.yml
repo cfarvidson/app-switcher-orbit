@@ -24,7 +24,7 @@ targets:
       base:
         CODE_SIGN_ENTITLEMENTS: Orbit/Resources/Orbit.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.appswitcher
-        MARKETING_VERSION: "1.1.0"
+        MARKETING_VERSION: "2.0.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"

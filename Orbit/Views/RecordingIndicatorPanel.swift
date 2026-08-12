@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Floating non-activating panel that appears near the cursor while
 /// `SpeechRecognitionService` is preparing or recording. Has three visible
-/// states: `loading` (Whisper model still being loaded/downloaded),
+/// states: `loading` (speech model still being loaded/downloaded),
 /// `starting` (model ready, waiting for the first audio buffer to confirm
 /// the engine is actually capturing), and `listening` (audio flowing).
 /// Click anywhere on the panel to stop.
@@ -65,7 +65,7 @@ final class RecordingIndicatorPanel: NSPanel {
     }
 
     /// Update the indicator state in place (e.g. flip from `loading` to
-    /// `listening` once Whisper is ready). Cheap — just mutates the
+    /// `listening` once the model is ready). Cheap — just mutates the
     /// observable model the SwiftUI view is watching.
     func updateState(_ state: State) {
         model?.state = state

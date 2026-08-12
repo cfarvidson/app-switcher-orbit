@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.0
+
+### Changed
+
+- Speech recognition now runs NVIDIA Parakeet TDT 0.6B v3 through FluidAudio instead of OpenAI Whisper through WhisperKit. Comparable accuracy at 600M parameters instead of 1.55B, with automatic punctuation and capitalization.
+- Dictation language is detected automatically across 25 European languages. The per-language ring tiles are replaced by a single dictation tile.
+- Settings no longer has a speech model picker - Parakeet has one model.
+
+### Removed
+
+- The translate-to-English tile. Parakeet has no translation mode; Whisper's `.translate` task was the only thing that supported it.
+- The macOS Dictation language sync. With no per-tile language left to mirror, Orbit no longer writes `com.apple.speech.recognition.AppleSpeechRecognition.prefs`.
+
+### Upgrade notes
+
+- Old WhisperKit models are not deleted automatically. They live in `~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/` and can run to several GB.
+- The Parakeet model downloads on first use from Settings → Dictation.
+
 ## 1.1.0
 
 ### New Features

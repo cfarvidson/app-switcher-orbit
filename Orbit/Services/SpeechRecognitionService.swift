@@ -56,7 +56,7 @@ final class SpeechRecognitionService: ObservableObject {
     // MARK: - Audio capture
 
     private let audioEngine = AVAudioEngine()
-    /// Whisper expects 16 kHz mono float samples. AVAudioEngine's default
+    /// Parakeet expects 16 kHz mono float samples. AVAudioEngine's default
     /// input format is the device sample rate; we convert via AVAudioConverter.
     private var converter: AVAudioConverter?
     private let targetSampleRate: Double = 16_000
@@ -65,8 +65,8 @@ final class SpeechRecognitionService: ObservableObject {
 
     // MARK: - Voice activity detection (VAD-based chunking)
     //
-    // We don't transcribe on a fixed timer because Whisper re-transcribes
-    // the whole buffer each pass with more context, so the result drifts
+    // We don't transcribe on a fixed timer because re-transcribing the
+    // whole buffer each pass with more context makes the result drift
     // (e.g. "stad oskiven omting" → "starta och skriva någonting"). Instead
     // we wait for the user to pause, transcribe the captured utterance once,
     // inject it cleanly, and reset the buffer for the next utterance.
@@ -585,7 +585,7 @@ final class SpeechRecognitionService: ObservableObject {
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
 
-        // Whisper wants 16 kHz mono Float32. Build a converter from whatever
+        // Parakeet wants 16 kHz mono Float32. Build a converter from whatever
         // the input device gives us.
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -884,9 +884,10 @@ final class SpeechRecognitionService: ObservableObject {
     private func installEscMonitor() {
         // ESC-only stop. The "stop on any keypress" variant was killing
         // legitimate dictation sessions whenever any incidental keystroke
-        // arrived between audio capture and Whisper finishing transcription
-        // (~600ms latency). Users who want to switch from dictation to
-        // typing should press ESC, click the indicator, or re-trigger Orbit.
+        // arrived between audio capture and the model finishing
+        // transcription (~600ms latency). Users who want to switch from
+        // dictation to typing should press ESC, click the indicator, or
+        // re-trigger Orbit.
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return }
             if event.keyCode != 53 { return }  // kVK_Escape

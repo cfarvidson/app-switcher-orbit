@@ -23,8 +23,9 @@ A macOS radial app switcher inspired by Hitman's weapon wheel. Press a shortcut 
 - **Edge activation** — optional auto-switch when the cursor reaches the ring edge, no click needed
 - **Scroll and arrow-key navigation** — two-finger swipe / scroll wheel rotates the highlight; Left/Right arrows + Enter also work
 - **Smart browser suppression** — when triggered with a mouse button, Orbit detects links and tab bars in Safari/Chrome and suppresses the trigger so middle-click-to-open and middle-click-to-close still work
-- **On-device dictation via Whisper** — opt-in language tiles at the start of the ring run [WhisperKit](https://github.com/argmaxinc/WhisperKit) (CoreML) entirely locally; click a tile and speak into the focused field. Audio never leaves your Mac.
-  - Choose from Tiny / Base / Small / Medium / Large v3 Turbo / Large v3 models
+- **On-device dictation** - an opt-in dictation tile in the ring runs NVIDIA Parakeet TDT 0.6B v3 through [FluidAudio](https://github.com/FluidInference/FluidAudio) (CoreML) entirely locally; click the tile and speak into the focused field. Audio never leaves your Mac.
+  - The spoken language is detected automatically across 25 European languages, with punctuation and capitalization
+  - One model, downloaded on first use from Settings → Dictation
   - Floating "Listening…" indicator near the cursor; click or re-press the hotkey to commit, ESC to cancel
   - Pastes via `NSPasteboard` + synthesized `Cmd+V` so it works in Electron/Chromium apps (Cursor, VS Code, Slack, Discord, Notion)
   - Pasted text is marked transient so clipboard history managers (Maccy, Paste, Pastebot, Raycast, Alfred) skip the entries
