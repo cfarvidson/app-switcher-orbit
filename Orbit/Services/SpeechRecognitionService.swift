@@ -459,7 +459,11 @@ final class SpeechRecognitionService: ObservableObject {
                     // above), so there's no continuity to carry across calls.
                     let decoderLayers = await manager.decoderLayerCount
                     var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-                    let result = try await manager.transcribe(finalSnapshot, decoderState: &decoderState)
+                    let result = try await manager.transcribe(
+                        finalSnapshot,
+                        decoderState: &decoderState,
+                        language: DictationLanguageScope.hint(for: SettingsService.shared.dictationLanguages)
+                    )
                     let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     await MainActor.run {
                         self.handleFlushedTranscript(text)
@@ -774,6 +778,7 @@ final class SpeechRecognitionService: ObservableObject {
 
         transcribing = true
         NSLog("[Orbit.speech] flushing \(Double(snapshot.count) / targetSampleRate)s of audio for transcription")
+        NSLog("[Orbit.speech] language hint=\(String(describing: DictationLanguageScope.hint(for: SettingsService.shared.dictationLanguages)))")
 
         Task { [weak self] in
             guard let self else { return }
@@ -783,7 +788,11 @@ final class SpeechRecognitionService: ObservableObject {
                 // above), so there's no continuity to carry across calls.
                 let decoderLayers = await manager.decoderLayerCount
                 var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-                let result = try await manager.transcribe(snapshot, decoderState: &decoderState)
+                let result = try await manager.transcribe(
+                    snapshot,
+                    decoderState: &decoderState,
+                    language: DictationLanguageScope.hint(for: SettingsService.shared.dictationLanguages)
+                )
                 let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 await MainActor.run {
                     self.handleFlushedTranscript(text)
