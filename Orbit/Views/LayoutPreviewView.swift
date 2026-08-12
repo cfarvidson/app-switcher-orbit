@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Circular preview for positioning anchored items (pinned apps + dictation
-/// languages). The user drags each icon around a scaled-down ring and the
-/// angle snaps to 15° increments on release. Writes back through
+/// Circular preview for positioning anchored items (pinned apps + the
+/// dictation tile). The user drags each icon around a scaled-down ring and
+/// the angle snaps to 15° increments on release. Writes back through
 /// `SettingsService` so the layout persists.
 struct LayoutPreviewView: View {
     @ObservedObject var settings = SettingsService.shared
@@ -20,7 +20,7 @@ struct LayoutPreviewView: View {
     /// carries both its persisted angle and an `id` that tells us which
     /// `SettingsService` dictionary to write back to.
     private struct Anchor: Identifiable, Equatable {
-        enum Kind: Equatable { case pinnedApp, language }
+        enum Kind: Equatable { case pinnedApp, dictation }
         let id: String
         let kind: Kind
         var angleDegrees: Double
@@ -29,7 +29,7 @@ struct LayoutPreviewView: View {
 
         enum AnchorIcon: Equatable {
             case app(NSImage)
-            case language(flag: String, badge: String)
+            case dictation
         }
     }
 
@@ -96,8 +96,6 @@ struct LayoutPreviewView: View {
         .padding(.vertical, 12)
         .onAppear { loadAnchors() }
         .onChange(of: settings.pinnedBundleIds) { loadAnchors() }
-        .onChange(of: settings.dictationLanguage1Id) { loadAnchors() }
-        .onChange(of: settings.dictationLanguage2Id) { loadAnchors() }
         .onChange(of: settings.dictationEnabled) { loadAnchors() }
     }
 
@@ -116,23 +114,15 @@ struct LayoutPreviewView: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(width: iconSize, height: iconSize)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-            case .language(let flag, let badge):
-                ZStack(alignment: .bottomTrailing) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(.ultraThinMaterial)
-                        .frame(width: iconSize, height: iconSize)
-                        .overlay(
-                            Text(flag)
-                                .font(.system(size: iconSize * 0.7))
-                        )
-                    Text(badge)
-                        .font(.system(size: iconSize * 0.22, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.black.opacity(0.6)))
-                        .padding(2)
-                }
+            case .dictation:
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.ultraThinMaterial)
+                    .frame(width: iconSize, height: iconSize)
+                    .overlay(
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: iconSize * 0.5, weight: .medium))
+                            .foregroundStyle(.primary)
+                    )
             }
         }
         .shadow(color: .black.opacity(0.3), radius: 4)
@@ -238,18 +228,16 @@ struct LayoutPreviewView: View {
 
     private func loadAnchors() {
         var result: [Anchor] = []
-        let languages = settings.dictationLanguages
-        settings.ensureAnchorAngles(for: languages)
+        settings.ensureAnchorAngles()
 
-        for language in languages {
-            let angle = settings.languageAngles[language.id] ?? 0
+        if settings.dictationEnabled {
             result.append(
                 Anchor(
-                    id: "lang:\(language.id)",
-                    kind: .language,
-                    angleDegrees: angle,
-                    displayName: language.displayName,
-                    icon: .language(flag: language.flagEmoji, badge: localeBadge(for: language.id))
+                    id: "dictation",
+                    kind: .dictation,
+                    angleDegrees: settings.dictationAngle ?? 0,
+                    displayName: "Dictation",
+                    icon: .dictation
                 )
             )
         }
@@ -277,20 +265,13 @@ struct LayoutPreviewView: View {
 
     private func commit(anchor: Anchor, angle: Double) {
         switch anchor.kind {
-        case .language:
-            let localeId = String(anchor.id.dropFirst("lang:".count))
-            settings.languageAngles[localeId] = angle
+        case .dictation:
+            settings.dictationAngle = angle
         case .pinnedApp:
             let bundleId = String(anchor.id.dropFirst("app:".count))
             settings.pinnedAngles[bundleId] = angle
         }
         settings.save()
         loadAnchors()
-    }
-
-    private func localeBadge(for localeId: String) -> String {
-        guard let first = localeId.split(separator: "_").first else { return "" }
-        let subtag = first.split(separator: "-").first.map(String.init) ?? String(first)
-        return subtag.uppercased()
     }
 }

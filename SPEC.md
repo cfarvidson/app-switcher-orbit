@@ -7,7 +7,7 @@ A macOS radial app switcher inspired by Hitman's weapon wheel. Press a global sh
 - macOS 14+ (Sonoma)
 - Swift 5.9
 - SwiftUI + AppKit hybrid (no storyboards, no XIBs)
-- Xcode project with one Swift Package dependency: [WhisperKit](https://github.com/argmaxinc/WhisperKit) (≥ 0.9.0) for on-device speech recognition
+- Xcode project with one Swift Package dependency: [FluidAudio](https://github.com/FluidInference/FluidAudio), pinned with `exactVersion: 0.15.5`, which provides the NVIDIA Parakeet TDT 0.6B v3 CoreML speech recognizer used for on-device dictation
 
 ## App Type
 
@@ -25,25 +25,24 @@ Orbit/
 ├── Info.plist
 ├── Models/
 │   ├── RunningApp.swift        # Wraps NSRunningApplication
-│   ├── DictationLanguage.swift # Locale id + display name + flag emoji
-│   ├── OrbitItem.swift         # Sum type: .app(RunningApp) | .language(DictationLanguage) | .translate(TranslatePair)
-│   └── TranslatePair.swift     # Source + target DictationLanguage for translate tile
+│   ├── OrbitItem.swift         # Sum type: .app(RunningApp) | .dictation
+│   └── RingLayout.swift        # Pure-data ring placement (anchors + gap filling)
 ├── Services/
 │   ├── AppService.swift             # Fetches running GUI apps
 │   ├── AudioInputDeviceService.swift # CoreAudio input device enumeration
 │   ├── HotkeyService.swift          # Carbon global hotkey + mouse button monitors
 │   ├── OverlayPanel.swift           # Floating transparent NSPanel
 │   ├── SettingsService.swift        # UserDefaults persistence (singleton)
-│   ├── DictationService.swift       # macOS dictation language plist writes + entry point that hands off to SpeechRecognitionService
-│   ├── SpeechRecognitionService.swift # In-process WhisperKit pipeline (audio capture, VAD, transcription, text injection)
+│   ├── SpeechRecognitionService.swift # In-process Parakeet pipeline (audio capture, VAD, transcription, text injection)
 │   └── UpdateService.swift          # GitHub release update checker
 ├── ViewModels/
 │   └── OrbitViewModel.swift    # Selection logic, angle math, event monitors
 ├── Views/
 │   ├── OrbitView.swift         # SwiftUI radial layout with hover tracking
 │   ├── AppIconView.swift       # Single app icon with selection glow
-│   ├── LanguageTileView.swift  # Dictation language tile (flag emoji + locale badge)
-│   ├── TranslateTileView.swift # Translate tile (source flag → arrow → target flag)
+│   ├── DictationTileView.swift # Dictation tile (mic.fill symbol)
+│   ├── LayoutPreviewView.swift # Drag-to-position preview for anchored items
+│   ├── RecordingIndicatorPanel.swift # Floating "Listening…" panel + its SwiftUI view
 │   ├── SettingsView.swift      # Tabbed settings window
 │   └── ShortcutRecorderView.swift  # Keyboard shortcut capture
 └── Resources/
@@ -68,7 +67,7 @@ Responsibilities:
 3. **Hotkey setup** — create `HotkeyService` with a callback that calls `toggleOrbit()`
 4. **Overlay panel** — create a single `OverlayPanel` hosting the `OrbitView`
 5. **Settings observation** — use Combine to observe changes to trigger settings (debounced 100ms) and re-register the hotkey
-6. **Settings window** — opened as a plain `NSWindow` (420x600) with `NSHostingView<SettingsView>`, not SwiftUI's Settings scene
+6. **Settings window** - opened as a plain `NSWindow` (520x640) with `NSHostingView<SettingsView>`, not SwiftUI's Settings scene
 7. **Toggle logic** — if visible, dismiss; if hidden, get `NSEvent.mouseLocation`, call `viewModel.show()`, then `overlayPanel.showOverlay(at:size:)`
 8. **Update check** — on launch, calls `UpdateService.checkForUpdate` to check for newer GitHub releases
 
@@ -86,45 +85,38 @@ struct RunningApp: Identifiable, Equatable {
 
 Equality is based on `id` (process ID) only.
 
-## DictationLanguage Model
-
-```swift
-struct DictationLanguage: Identifiable, Equatable, Codable {
-    let id: String          // underscore locale format, e.g. "en_US", "sv_SE"
-    let displayName: String
-    let flagEmoji: String
-}
-```
-
-- `id` uses the underscore format macOS writes into `DictationIMNetworkBasedLocaleIdentifier` (not the hyphen BCP-47 form).
-- `from(localeId:)` parses the region subtag and derives the flag emoji via regional-indicator Unicode (`"sv_SE"` → `🇸🇪`). Falls back to 🏳️ if no 2-letter region is parseable.
-- `displayName` is looked up via `Locale.current.localizedString(forIdentifier:)` after converting the id to hyphen form.
-
 ## OrbitItem Model
 
 ```swift
 enum OrbitItem: Identifiable, Equatable {
     case app(RunningApp)
-    case language(DictationLanguage)
-    case translate(TranslatePair)
-    var id: String { /* "app:<pid>", "lang:<locale>", or "translate:<sourceLocale>" */ }
-    var displayName: String { /* RunningApp.name, DictationLanguage.displayName, or "Swedish → English (US)" */ }
+    case dictation
+    var id: String { /* "app:<pid>" or "dictation" */ }
+    var displayName: String { /* RunningApp.name or "Dictation" */ }
 }
 ```
 
-The ring consumes `[OrbitItem]` so apps, dictation language tiles, and translate tiles can coexist. All ring mechanics (angle math, scroll-to-rotate, arrow navigation, sticky selection) operate on indices over `items`, independent of item type.
+The ring consumes `[OrbitItem]` so apps and the dictation tile can coexist. There is exactly one dictation tile and it carries no payload: Parakeet detects the spoken language itself, so there is nothing to select per tile. All ring mechanics (angle math, scroll-to-rotate, arrow navigation, sticky selection) operate on indices over `items`, independent of item type.
 
-## TranslatePair Model
+## RingLayout
+
+Pure-data layout engine (`enum RingLayout`, no state, no UI). Angles are degrees with 0° at 12 o'clock, increasing clockwise.
 
 ```swift
-struct TranslatePair: Identifiable, Equatable {
-    let source: DictationLanguage   // e.g. sv_SE — the language the user speaks into
-    let target: DictationLanguage   // the en_* variant displayed in the tile and indicator
-    var id: String { "translate:\(source.id)" }
+struct Positioned: Equatable {
+    let item: OrbitItem
+    let angleDegrees: Double
+    let isAnchored: Bool
 }
+
+static func compute(anchoredItems: [(item: OrbitItem, angleDegrees: Double)],
+                    nonPinned: [OrbitItem]) -> [Positioned]
+static func nextAnchorAngle(existingAngles: [Double]) -> Double
 ```
 
-`target` is cosmetic: WhisperKit's `.translate` task always outputs English regardless of which `en_*` variant is stored here. The `id` is keyed only on `source.id` so the tile's anchor angle stays stable when the user changes their preferred English variant in System Settings (e.g. `en_US` → `en_GB`) — otherwise the angle-keyed slot would drift.
+- `compute` places anchored items (pinned apps and the dictation tile) at their stored angles, sorted clockwise, then distributes the non-pinned running apps across the gaps between anchors proportionally to each gap's arc. Fractional leftovers are handed to the gaps with the largest remainders so the placed count always matches the input count. Items inside a gap are evenly spaced with equal margins at both ends so they do not collide with the anchors.
+- With no anchors at all, `compute` falls back to even distribution over 360°.
+- `nextAnchorAngle` returns the angle for a newly anchored item: `0` when there are no anchors, the point opposite the single existing anchor when there is one, otherwise the midpoint of the largest empty arc. Duplicate angles in the input are tolerated and contribute a zero-width gap, never a full circle; if every anchor sits at the same angle there is no arc to measure and the result is the opposite point. This matters because `compute` has no duplicate handling: two anchors sharing an angle render stacked on the same point, with the later one taking the hit-testing, so an anchor placed on top of another looks and behaves like the wrong tile.
 
 ## AppService
 
@@ -215,81 +207,69 @@ Singleton (`shared`) `ObservableObject` backed by `UserDefaults`.
 
 ### Stored Properties
 
-| Property                | Type                                   | Default                  | UserDefaults Key          |
-| ----------------------- | -------------------------------------- | ------------------------ | ------------------------- |
-| triggerType             | `.keyboard` / `.mouseButton` / `.both` | `.keyboard`              | `triggerType`             |
-| inputMode               | `.mouse` / `.trackpad`                 | `.mouse`                 | `inputMode`               |
-| keyCode                 | `UInt32`                               | `kVK_Space` (49)         | `keyCode`                 |
-| modifiers               | `UInt32`                               | `optionKey` (2048)       | `modifiers`               |
-| keyDisplayName          | `String`                               | `"Space"`                | `keyDisplayName`          |
-| mouseButton             | `Int`                                  | `2` (middle)             | `mouseButton`             |
-| edgeActivation          | `Bool`                                 | `false`                  | `edgeActivation`          |
-| pinnedBundleIds         | `[String]`                             | `[]`                     | `pinnedBundleIds`         |
-| excludedBundleIds       | `Set<String>`                          | `[]`                     | `excludedBundleIds`       |
-| dictationEnabled        | `Bool`                                 | `false`                  | `dictationEnabled`        |
-| dictationLanguage1Id    | `String?`                              | `nil`                    | `dictationLanguage1Id`    |
-| dictationLanguage2Id    | `String?`                              | `nil`                    | `dictationLanguage2Id`    |
-| dictationModelName      | `String`                               | `"openai_whisper-small"` | `dictationModelName`      |
-| translateTileEnabled    | `Bool`                                 | `false`                  | `translateTileEnabled`    |
-| translateSourceLocaleId | `String`                               | `"sv_SE"`                | `translateSourceLocaleId` |
-| translateAngle          | `Double?`                              | `nil`                    | `translateAngle`          |
-| dictationInputDeviceUID | `String?`                              | `nil`                    | `dictationInputDeviceUID` |
+| Property                       | Type                                   | Default            | UserDefaults Key                 |
+| ------------------------------ | -------------------------------------- | ------------------ | -------------------------------- |
+| triggerType                    | `.keyboard` / `.mouseButton` / `.both` | `.keyboard`        | `triggerType`                    |
+| inputMode                      | `.mouse` / `.trackpad`                 | `.mouse`           | `inputMode`                      |
+| keyCode                        | `UInt32`                               | `kVK_Space` (49)   | `keyCode`                        |
+| modifiers                      | `UInt32`                               | `optionKey` (2048) | `modifiers`                      |
+| keyDisplayName                 | `String`                               | `"Space"`          | `keyDisplayName`                 |
+| mouseButton                    | `Int`                                  | `2` (middle)       | `mouseButton`                    |
+| edgeActivation                 | `Bool`                                 | `false`            | `edgeActivation`                 |
+| pinnedBundleIds                | `[String]`                             | `[]`               | `pinnedBundleIds`                |
+| excludedBundleIds              | `Set<String>`                          | `[]`               | `excludedBundleIds`              |
+| dictationEnabled               | `Bool`                                 | `false`            | `dictationEnabled`               |
+| dictationSilenceTriggerSeconds | `Double`                               | `0.8`              | `dictationSilenceTriggerSeconds` |
+| pinnedAngles                   | `[String: Double]`                     | `[:]`              | `pinnedAngles`                   |
+| dictationAngle                 | `Double?`                              | `nil`              | `dictationAngle`                 |
+| dictationInputDeviceUID        | `String?`                              | `nil`              | `dictationInputDeviceUID`        |
 
-All properties are `@Published`. The `save()` method writes all properties to UserDefaults.
+All properties are `@Published`. The `save()` method writes all properties to UserDefaults; the two optional keys (`dictationAngle`, `dictationInputDeviceUID`) are removed from the domain rather than written when they are `nil`.
 
-`translateTileEnabled` defaults to `false` so existing users do not get a surprise tile after upgrading. `translateAngle` is assigned by `ensureAnchorAngles` when `translatePair` first becomes non-nil and is preserved when the tile is toggled off — re-enabling restores the same ring slot. `dictationInputDeviceUID` stores the CoreAudio `kAudioDevicePropertyDeviceUID` string (e.g. `"BuiltInMicrophoneDevice"`); `nil` means follow the system default input device.
+`dictationEnabled` defaults to `false` so existing users do not get a surprise tile after upgrading. `dictationAngle` is assigned by `ensureAnchorAngles()` the first time dictation is enabled and is preserved when the tile is toggled off - re-enabling restores the same ring slot. `pinnedAngles` maps bundle id to a clockwise-from-12-o'clock angle in degrees; it is read back through a manual `NSNumber`/`Double` walk because `dictionary(forKey:) as? [String: Double]` does not round-trip reliably through UserDefaults. `dictationInputDeviceUID` stores the CoreAudio `kAudioDevicePropertyDeviceUID` string (e.g. `"BuiltInMicrophoneDevice"`); `nil` means follow the system default input device.
+
+### Layout angles
+
+- `allAnchorAngles: [Double]` - every stored anchor angle (pinned apps plus the dictation tile) in one flat list, used as the input to `RingLayout.nextAnchorAngle`.
+- `ensureAnchorAngles()` - assigns an angle to every pinned bundle id that lacks one and to the dictation tile when `dictationEnabled` is true, prunes angles for bundle ids that are no longer pinned, and saves if anything changed. Called at the start of every `OrbitViewModel.show()` and when the dictation toggle is switched on.
+- `resetLayoutAngles()` - clears `pinnedAngles` and `dictationAngle` and saves; the next `ensureAnchorAngles()` reassigns defaults.
 
 ### Computed Properties
 
 - `shortcutDisplayString` — builds a string like "⌥ Space" from modifier flags and key name, using Unicode symbols (⌃ ⌥ ⇧ ⌘)
 - `mouseButtonDisplayName` — human-readable name for the selected mouse button
-- `dictationLanguages: [DictationLanguage]` — resolved language tiles for the ring. Empty when `dictationEnabled` is false or no language ids are stored. Builds one `DictationLanguage` per non-nil id via `DictationLanguage.from(localeId:)`.
-- `translatePair: TranslatePair?` — returns a `TranslatePair` when `translateTileEnabled` is true, `translateSourceLocaleId` is present in `DictationService.enabledLocales()`, and at least one locale is enabled. The target is the first `en_*` entry in the enabled-locales list, falling back to a hardcoded `en_US` if no English locale is enabled. Returns `nil` if the configured source locale has been removed from System Settings.
 
-## DictationService
+### Stale keys from earlier versions
 
-Stateless enum that reads/writes the active macOS built-in Dictation language and hands off recognition to `SpeechRecognitionService`. The two responsibilities are independent:
+Orbit does not read or migrate defaults keys written by versions before 2.0.0: `dictationLanguage1Id`, `dictationLanguage2Id`, `dictationModelName`, `languageAngles`, `translateTileEnabled`, `translateSourceLocaleId` and `translateAngle`. They are left in the domain untouched. A rebuild does not need to handle them.
 
-- **Language plist writes** — keep macOS's own Dictation HUD in sync with Orbit's selected language so the user's _physical_ dictation shortcut honors the same language. Cosmetic; Orbit does not depend on it for its own recognition.
-- **Recognition entry point** — `switchLanguageAndStart(_:)` calls `SpeechRecognitionService.shared.start(localeId:)` which runs WhisperKit entirely in-process.
+### macOS system Dictation
 
-### Historical note
-
-Earlier versions tried two different paths to start macOS's built-in DictationIM: synthesizing the user's configured shortcut via `CGPostKeyboardEvent`, and walking the frontmost app's `Edit → Start Dictation…` menu via the Accessibility API. Both were abandoned. DictationIM consistently died ~1.4 s after start with `(null)` errors, the locale cache required process kills that opened kill/respawn windows where posts were dropped, and the whole undocumented surface was fragile. Orbit now runs OpenAI Whisper locally via WhisperKit and never invokes DictationIM.
-
-### Plist surface (language switch only)
-
-- **Domain:** `com.apple.speech.recognition.AppleSpeechRecognition.prefs`
-- **Active language key:** `DictationIMNetworkBasedLocaleIdentifier` (String, underscore locale format, e.g. `"en_US"`)
-- **Preference order key:** `DictationIMPreferredLanguageIdentifiers` (Array<String>) — reordered so the target locale is first
-- **Enabled locales key:** `VisibleNetworkSRLocaleIdentifiers` (Dict<String, Int>; `1` = enabled)
-
-### API
-
-- `enabledLocales() -> [DictationLanguage]` — reads `VisibleNetworkSRLocaleIdentifiers`, returns enabled entries, preserving `DictationIMPreferredLanguageIdentifiers` order.
-- `currentLanguage() -> String?` — reads `DictationIMNetworkBasedLocaleIdentifier`.
-- `setLanguage(_ localeId:)` — idempotent (no-op when the target already matches). Writes the active locale and reorders the preferred-language array. Performs a read-back verification after the write; mismatches are logged via `os.Logger`. Does **not** restart DictationIM — Orbit no longer depends on it.
-- `switchLanguageAndStart(_ localeId:)` — calls `setLanguage` then `SpeechRecognitionService.shared.startDictation(localeId:)`. (Internally renamed from `start(localeId:)` — behavior is unchanged.)
-- `startTranslation(pair:)` — starts a WhisperKit translate session via `SpeechRecognitionService.shared.startTranslation(sourceLocaleId:targetLocaleId:)`. Deliberately does **not** call `setLanguage`: macOS system Dictation cannot translate, so writing the source locale into `AppleSpeechRecognition.prefs` would misconfigure the user's physical dictation shortcut.
+Orbit does not read or write `com.apple.speech.recognition.AppleSpeechRecognition.prefs` and never invokes macOS's built-in DictationIM. Earlier versions did: they synthesized the user's dictation shortcut via `CGPostKeyboardEvent`, then walked the frontmost app's `Edit → Start Dictation…` menu via the Accessibility API, and mirrored the selected locale into the plist. All of it was abandoned. DictationIM consistently died ~1.4 s after start with `(null)` errors, its locale cache required process kills that opened windows where synthesized events were dropped, and the surface is undocumented. Recognition runs entirely inside Orbit instead. Do not reintroduce this path.
 
 ## SpeechRecognitionService
 
-`ObservableObject` singleton (`SpeechRecognitionService.shared`) that runs the entire dictation pipeline in-process. Replaces a previous `SFSpeechRecognizer` implementation, which had shallow language understanding outside English (bad punctuation, no auto-capitalization, no sentence-boundary modeling). WhisperKit handles all 99 Whisper languages with proper punctuation and casing.
+`ObservableObject` singleton (`SpeechRecognitionService.shared`) that runs the entire dictation pipeline in-process on NVIDIA Parakeet TDT 0.6B v3, a transducer ASR model executed as CoreML on Apple Silicon through the FluidAudio package. Parakeet auto-detects the spoken language across 25 European languages and emits punctuation and capitalization, so there is no locale to configure and nothing to select per session.
 
-The public API exposes two entry points that delegate to a shared private implementation:
+The service holds a `FluidAudio.AsrManager` (`private var asrManager: AsrManager?`), created and loaded once and reused for every session.
 
-- `startDictation(localeId:onError:)` — transcribes the audio in the given locale with `task: .transcribe`.
-- `startTranslation(sourceLocaleId:targetLocaleId:onError:)` — transcribes with `task: .translate`, which always outputs English regardless of source. `targetLocaleId` is used only for the indicator display; Whisper ignores it.
+Public API:
 
-Both delegate to `startInternal(localeId:task:targetLocaleIdForDisplay:onError:)`, which captures the chosen `DecodingTask` in private state (`currentTask: DecodingTask`, `currentTranslationTargetId: String?`). `flushAndTranscribe` and the final flush in `stop` both read `currentTask` rather than hardcoding `.transcribe`. Both fields are reset to their defaults (`.transcribe` / `nil`) at the **end** of `stop()`, after the final-flush dispatch, to avoid a race between the reset and the async transcription task completing.
+- `startDictation(onError:)` - starts a session. Takes no locale and no task. Delegates to the private `startInternal(onError:)`.
+- `warmupAudioCapture()` / `cancelWarmup()` - pre-roll capture, described below.
+- `stop(reason:flushBuffer:)` - ends a session, optionally transcribing whatever is still buffered.
+- `prewarm()` - loads an already-downloaded model into RAM at launch; never downloads.
+- `downloadAndLoadModel()` - the Settings entry point; downloads if needed, then loads.
+- `isModelDownloaded()` - presence check against FluidAudio's model cache, no network, no load.
+- `modelStatus` - `@Published` lifecycle state driving the Settings UI.
 
 ### Pipeline
 
-1. `AVAudioEngine` taps the input node and runs samples through an `AVAudioConverter` to 16 kHz mono Float32 (the format Whisper expects).
+1. `AVAudioEngine` taps the input node and runs samples through an `AVAudioConverter` to 16 kHz mono Float32 (the format Parakeet expects).
 2. Each tap callback computes RMS amplitude over the converted samples for a cheap voice-activity detector. Above the threshold = speech, below = silence.
-3. After `silenceTriggerSeconds` of continuous silence following speech (and at least `minSpeechSeconds` of speech in the buffer), or after a hard `maxBufferSeconds` cap, the buffered audio is handed to `WhisperKit.transcribe(audioArray:decodeOptions:)`.
-4. The resulting transcript is filtered (Whisper boilerplate like `[Music]`, `Thanks for watching!` is dropped) and injected into the frontmost app via the **clipboard-paste path** described below. Consecutive utterances within a session are joined with a single space.
-5. ESC cancels the session (discards the buffer). Clicking the floating indicator, re-triggering Orbit, or hitting the 60 s hard cap commits the session — `stop(reason:flushBuffer:)` runs a final transcription on whatever's still in the buffer before tearing down, so the natural "speak then press hotkey to stop" flow doesn't lose the last utterance.
+3. After `SettingsService.dictationSilenceTriggerSeconds` of continuous silence following speech (and at least `minSpeechSeconds` of speech in the buffer), or after a hard `maxBufferSeconds` cap, the buffered audio is handed to `AsrManager.transcribe(_:decoderState:)`. Each flush allocates a **fresh** `TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)`: a flush is one complete utterance, so there is no decoder continuity to carry across calls. No language argument is passed - the model detects it.
+4. The resulting transcript is filtered (a transcript wrapped entirely in `[...]` or `(...)` is dropped, and both the ASCII `...` and the Unicode `…` ellipsis forms are stripped because the model emits them for mid-sentence pauses, then any resulting double spaces are collapsed to single spaces and the result re-trimmed) and injected into the frontmost app via the **clipboard-paste path** described below. Consecutive utterances within a session are joined with a single space.
+5. ESC cancels the session (discards the buffer). Clicking the floating indicator, re-triggering Orbit, or hitting the 60 s hard cap commits the session - `stop(reason:flushBuffer:)` runs a final transcription on whatever's still in the buffer before tearing down, so the natural "speak then press hotkey to stop" flow doesn't lose the last utterance. The final flush is skipped when a VAD-triggered transcription is already in flight (`transcribing == true`): that in-flight task still injects its own result, and the few hundred ms captured after it was dispatched would only transcribe as a broken fragment.
 
 ### Text injection (clipboard paste)
 
@@ -309,26 +289,28 @@ The pre-flight log line — `inject pre-flight: frontApp=… bundleId=… axTrus
 
 ### VAD parameters
 
-| Parameter               | Value   | Purpose                                                             |
-| ----------------------- | ------- | ------------------------------------------------------------------- |
-| `speechRmsThreshold`    | `0.012` | Empirically tuned: quiet speech passes, baseline room noise doesn't |
-| `silenceTriggerSeconds` | `0.8`   | How long to wait after speech before flushing                       |
-| `minSpeechSeconds`      | `0.3`   | Don't bother transcribing very short blips                          |
-| `maxBufferSeconds`      | `25.0`  | Hard cap so a sustained "uhhh" can't accumulate forever             |
+| Parameter                                        | Value           | Purpose                                                             |
+| ------------------------------------------------ | --------------- | ------------------------------------------------------------------- |
+| `speechRmsThreshold`                             | `0.012`         | Empirically tuned: quiet speech passes, baseline room noise doesn't |
+| `SettingsService.dictationSilenceTriggerSeconds` | `0.8` (0.5-3.0) | How long to wait after speech before flushing; user-adjustable      |
+| `minSpeechSeconds`                               | `0.3`           | Don't bother transcribing very short blips                          |
+| `maxBufferSeconds`                               | `25.0`          | Hard cap so a sustained "uhhh" can't accumulate forever             |
 
-We deliberately do **not** transcribe on a fixed timer because Whisper re-decodes the whole buffer each pass with more context, which causes the live transcript to drift (e.g. "stad oskiven omting" → "starta och skriva någonting"). VAD-based one-shot flushes avoid that.
+Everything except the silence trigger is a compile-time constant on the service; the silence trigger is read from `SettingsService` on every tap callback so the Settings slider takes effect mid-session.
 
-### Decoding options
-
-`DecodingOptions(verbose: false, task: currentTask, language: <BCP-47 head>, temperature: 0, temperatureFallbackCount: 5, skipSpecialTokens: true, withoutTimestamps: true, noSpeechThreshold: 0.5)`. `currentTask` is `.transcribe` for normal dictation and `.translate` for translate sessions. The locale id passed to `startDictation`/`startTranslation` is converted to a hyphen-form BCP-47 root (e.g. `"en_US"` → `"en"`) for Whisper.
+We deliberately do **not** transcribe on a fixed timer. Re-decoding the whole growing buffer on each pass makes the emitted text drift as more context arrives (e.g. "stad oskiven omting" → "starta och skriva någonting"). VAD-based one-shot flushes avoid that.
 
 ### Model lifecycle
 
-- **Catalog:** see `WhisperModelOption.all` in `SettingsView.swift` — Tiny / Base / Small (default & recommended) / Medium / Large v3 Turbo / Large v3.
-- **Cache location:** `~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/<modelName>/`. `isModelDownloaded(_:)` walks that folder looking for `.mlmodelc` or `.mlpackage` entries.
-- **Download:** `downloadAndLoadModel(_:)` calls `WhisperKit.download(variant:from:progressCallback:)` against `argmaxinc/whisperkit-coreml` on Hugging Face, then loads the model into RAM via `WhisperKit(WhisperKitConfig(modelFolder:))`. Idempotent — re-entrant calls during an in-flight download are no-ops. Downloads only ever happen from explicit user actions in Settings → Dictation; the language tile never triggers a download.
+- **Model:** one fixed model, `SpeechRecognitionService.modelDisplayName` = `"Parakeet TDT 0.6B v3"`. There is no picker and no catalog.
+- **Cache location:** FluidAudio's own model cache, `AsrModels.defaultCacheDirectory(for: .v3)`, which resolves to `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3/`. `isModelDownloaded()` is `AsrModels.modelsExist(at:version:)` against that directory.
+- **Download:** `downloadAndLoadModel()` calls `AsrModels.downloadAndLoad(version: .v3)` with a progress callback that republishes `progress.fractionCompleted` into `modelStatus`, then constructs `AsrManager(config: .default)` and calls `loadModels(_:)`. Idempotent - a call while a download is in flight, or after the manager already exists, is a no-op. Downloads only ever happen from explicit user actions in Settings → Dictation; clicking the dictation tile never triggers one.
 - **Prewarm:** `AppDelegate.applicationDidFinishLaunching` calls `prewarm()` if dictation is enabled. Prewarm loads an already-downloaded model into RAM at startup but never initiates a download.
-- **Status:** `@Published var modelStatus: ModelStatus` (`.notDownloaded` / `.downloading(progress, modelName)` / `.loading(modelName)` / `.ready(modelName)` / `.error(message)`) — drives the Settings UI.
+- **Status:** `@Published var modelStatus: ModelStatus`, where `ModelStatus` is `.notDownloaded` / `.downloading(progress: Double)` / `.loading` / `.ready` / `.error(String)`. No case carries a model name, because there is only one model.
+
+### Models left behind by earlier versions
+
+Versions before 2.0.0 ran WhisperKit and cached its models under `~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/`. Orbit deliberately does not touch that directory: deleting files a previous version downloaded into the user's Documents folder is not something an app should do behind the user's back, and a user who downgrades would have to fetch them again. The directory can run to several GB and is safe for the user to delete by hand. A rebuild should reproduce this behavior, which is to say it should do nothing at all.
 
 ### Permissions
 
@@ -336,13 +318,13 @@ We deliberately do **not** transcribe on a fixed timer because Whisper re-decode
 
 ### Error surfacing
 
-`startInternal(localeId:task:targetLocaleIdForDisplay:onError:)` runs three pre-flight checks before capture begins. Each failure both reports the error via the `onError` callback and shows a user-visible NSAlert so the failure isn't silent:
+`startInternal(onError:)` runs three pre-flight checks before capture begins. Each failure both reports the error via the `onError` callback and shows a user-visible NSAlert so the failure isn't silent:
 
-| Failure                       | Alert                                                                                |
-| ----------------------------- | ------------------------------------------------------------------------------------ |
-| Selected model not downloaded | "Dictation needs setup" → opens Orbit Settings via `.orbitOpenSettings` notification |
-| Microphone permission denied  | "Microphone access denied" → opens System Settings → Privacy & Security → Microphone |
-| Audio engine fails to start   | NSLogged; `onError` reports the underlying error                                     |
+| Failure                      | Alert                                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------ |
+| Model not downloaded         | "Dictation needs setup" → opens Orbit Settings via `.orbitOpenSettings` notification |
+| Microphone permission denied | "Microphone access denied" → opens System Settings → Privacy & Security → Microphone |
+| Audio engine fails to start  | NSLogged; `onError` reports the underlying error                                     |
 
 ### Re-entrancy and lockout
 
@@ -350,9 +332,19 @@ We deliberately do **not** transcribe on a fixed timer because Whisper re-decode
 
 ### Floating indicator
 
-`RecordingIndicatorPanel` is a borderless non-activating `NSPanel` shown near the cursor while a session is preparing or recording. Two states: `.loading(message)` while the model is being loaded, and `.listening` while audio capture is active. Click anywhere on the panel to stop the session.
+`RecordingIndicatorPanel` is a borderless non-activating `NSPanel` (220×64) shown near the cursor while a session is preparing or recording. `show(state:onStopTapped:)` builds it; `updateState(_:)` mutates the observable model in place so the panel can change state without rebuilding the view tree. Click anywhere on the panel to stop the session.
 
-`show(localeId:state:onClick:)` accepts an optional `targetLocaleId: String?` parameter. When non-nil (translate sessions only), the indicator's flag region renders source flag → arrow → target flag instead of the single source flag, and the label reads e.g. "🇸🇪 → 🇺🇸 listening…". The `currentTranslationTargetId` captured at session start is passed here; `nil` for regular dictation sessions so the indicator is unchanged from its historical behavior.
+Three states, each with a status line and a hint line:
+
+| State               | Status       | Hint                                         | Icon                     |
+| ------------------- | ------------ | -------------------------------------------- | ------------------------ |
+| `.loading(message)` | the message  | `"First-time download \u{2014} please wait"` | `arrow.down.circle.fill` |
+| `.starting`         | "Starting…"  | "Almost ready…"                              | `mic.fill`               |
+| `.listening`        | "Listening…" | "Click or press ESC to stop"                 | `mic.fill`               |
+
+`.loading` and `.starting` pulse a gray dot; `.listening` pulses a red one. The panel carries no language or flag indication: a session has no language.
+
+`.starting` exists because `AVAudioEngine.start()` returns 100-300 ms before the first buffer is actually delivered. The indicator holds `.starting` until `processAudioBuffer` sees its first session-mode buffer, then flips to `.listening`. A session promoted from warmup skips `.starting` entirely, because audio has been flowing since the ring opened.
 
 ### Notification
 
@@ -364,9 +356,9 @@ At the very top of `beginCapture`, before reading `inputNode.outputFormat`, the 
 
 ### Pre-roll capture (warmup)
 
-When the Orbit ring opens, `OrbitViewModel.show()` calls `SpeechRecognitionService.shared.warmupAudioCapture()` (gated on `dictationEnabled` or `translateTileEnabled`). This starts the audio engine in a "warmup" mode that fills a 2-second circular `prerollBuffer` without showing the recording indicator or committing to a session.
+When the Orbit ring opens, `OrbitViewModel.show()` calls `SpeechRecognitionService.shared.warmupAudioCapture()` (gated on `dictationEnabled`). This starts the audio engine in a "warmup" mode that fills a 2-second circular `prerollBuffer` (32 000 samples at 16 kHz) without showing the recording indicator or committing to a session. It is a no-op when a session is already running, when warmup is already active, or when microphone permission has not already been granted - opening the ring must never trigger a permission prompt.
 
-If the user clicks a dictation/translate tile, `startInternal` detects warmup is active and calls `promoteWarmupToSession`, which atomically swaps the preroll contents into the session's `audioBuffer` under `audioBufferQueue.sync`. The engine continues running without restart — the user benefits from the audio captured before the click, eliminating the first-words-dropped problem caused by `AVAudioEngine.start()`'s 100-300ms startup latency.
+If the user clicks the dictation tile, `startInternal` detects warmup is active and calls `promoteWarmupToSession`, which atomically swaps the preroll contents into the session's `audioBuffer` under `audioBufferQueue.sync`. The engine continues running without restart - the user benefits from the audio captured before the click, eliminating the first-words-dropped problem caused by `AVAudioEngine.start()`'s 100-300ms startup latency.
 
 If the user dismisses the ring without clicking a tile, `OrbitViewModel.dismiss()` calls `cancelWarmup()` which stops the engine and discards the preroll buffer.
 
@@ -403,30 +395,35 @@ Geometry is snapshotted once per show to avoid reading SettingsService on every 
 
 | Property        | Mouse Mode | Trackpad Mode |
 | --------------- | ---------- | ------------- |
-| radius          | 140pt      | 180pt         |
+| radius          | 180pt      | 230pt         |
 | iconSize        | 56pt       | 68pt          |
-| orbitSize       | 400pt      | 500pt         |
-| deadZone        | 35pt       | 45pt          |
+| orbitSize       | 480pt      | 600pt         |
+| deadZone        | 45pt       | 55pt          |
 | stickySelection | false      | true          |
 
 ### Key Properties
 
 - `isVisible: Bool` — controls overlay visibility
-- `items: [OrbitItem]` — current ring contents: dictation-language tiles (when `dictationEnabled` and configured) followed by pinned apps followed by other running apps
+- `positionedItems: [RingLayout.Positioned]` - the laid-out ring: each entry pairs an `OrbitItem` with its angle and whether it is anchored
+- `items: [OrbitItem]` - convenience projection of `positionedItems` for the call sites that only care about count and index semantics
 - `selectedIndex: Int?` — which item is highlighted
 - `onDismiss: (() -> Void)?` — callback to hide the overlay panel
 
 ### Ring Contents (show)
 
-On each `show()`, the ring is rebuilt from anchored items (language tiles, then the translate tile if present) followed by running apps. Anchored items are placed at their stored angles; apps fill the remaining angular space.
+On each `show()`:
 
-Language tiles come first (when `dictationEnabled` and at least one language is configured). After the language anchor loop, if `settings.translatePair` is non-nil and `settings.translateAngle` is set, a `.translate(pair)` entry is appended at that angle. Running apps follow, with pinned apps at the front of the app section. `SettingsService.ensureAnchorAngles(for:)` is called at the start of `show()` and assigns `translateAngle` if it is nil and a translate pair now exists.
+1. `SettingsService.ensureAnchorAngles()` runs first, so every pinned app and the dictation tile have an angle before layout.
+2. The anchored list is built as `(.dictation, dictationAngle)` when `dictationEnabled` and an angle exists, then one entry per pinned app that has a stored angle.
+3. `AppService.runningApps(excluding:pinnedFirst:)` is split into pinned and non-pinned; the non-pinned apps are the gap fillers.
+4. `RingLayout.compute(anchoredItems:nonPinned:)` returns `positionedItems`, sorted clockwise from 12 o'clock.
+5. `warmupAudioCapture()` is called when `dictationEnabled` is true.
 
 ### Angle & Position Math
 
-- Items are distributed evenly around a circle: `angle = (2π / count) × index - π/2`
-- The `-π/2` offset places the first item at the 12 o'clock position
-- `positionForIndex` converts the angle to (x, y) using `center + radius × (cos, -sin)` (Y is inverted for SwiftUI coordinates)
+- Angles are stored and laid out as degrees clockwise from 12 o'clock. `RingLayout` owns the placement; the view model only renders and hit-tests them.
+- `positionForIndex` converts a stored angle to a SwiftUI point (y grows downward): `x = center.x + radius × sin(θ)`, `y = center.y - radius × cos(θ)`. So 0° is the top, 90° the right, 180° the bottom, 270° the left.
+- `angleForIndex` converts the same stored angle into the math convention used by the mouse-angle comparison (radians, 0 at +x, counter-clockwise positive): `π/2 - θ`.
 
 ### Selection Logic (updateSelection)
 
@@ -474,9 +471,8 @@ All monitors are removed on dismiss.
 - Dismisses the overlay
 - After a 50ms delay, branches on the selected `OrbitItem`:
   - `.app(let app)` — calls `app.app.activate()` on the `NSRunningApplication`
-  - `.language(let language)` — calls `DictationService.switchLanguageAndStart(language.id)`
-  - `.translate(let pair)` — calls `DictationService.startTranslation(pair: pair)`
-- The delay ensures the overlay is fully hidden before activation or dictation/translation start
+  - `.dictation` - calls `SpeechRecognitionService.shared.startDictation(onError:)`, logging any error
+- The delay ensures the overlay is fully hidden before activation or dictation start
 
 ## OrbitView (SwiftUI)
 
@@ -486,8 +482,8 @@ Layered inside a `ZStack`, only rendered when `viewModel.isVisible`:
 2. **Ring guide** — `Circle` stroke, white at 10% opacity, 1pt line, diameter = `radius × 2`
 3. **Center dot** — 6pt white circle at 40% opacity
 4. **Selection line** — dashed `Path` from center to selected app's position, accent color at 40% opacity, dash pattern `[4, 4]`
-5. **Ring items** — `ForEach` over enumerated `viewModel.items`, switching on `OrbitItem` to render an `AppIconView` (for `.app`), a `LanguageTileView` (for `.language`), or a `TranslateTileView` (for `.translate`). Each is positioned via `.position()`; tap triggers `selectAndSwitch()`.
-6. **Item label** — shown when an item is selected, centered below the middle in a capsule with `.ultraThinMaterial`. Reads `viewModel.items[index].displayName` so it works for both apps and languages.
+5. **Ring items** - `ForEach` over enumerated `viewModel.positionedItems`, switching on `OrbitItem` to render an `AppIconView` (for `.app`) or a `DictationTileView` (for `.dictation`). Both receive the entry's `isAnchored` flag. Each is positioned via `.position()`; tap sets `selectedIndex` and triggers `selectAndSwitch()`.
+6. **Item label** - shown when an item is selected, centered below the middle in a capsule with `.ultraThinMaterial`. Reads `viewModel.items[index].displayName`, so it renders the app name or "Dictation".
 
 ### Interactions
 
@@ -499,7 +495,7 @@ Layered inside a `ZStack`, only rendered when `viewModel.isVisible`:
 
 Displays a single app icon:
 
-- `Image(nsImage:)` resized to `size × size` with `.aspectRatio(.fit)`
+- `Image(nsImage:)` resized to `effectiveSize × effectiveSize` with `.aspectRatio(.fit)`, where `effectiveSize = isAnchored ? size * 1.2 : size` - anchored (pinned) icons render 20% larger so the user's curated apps outweigh the transient running-app crowd
 - Clipped to `RoundedRectangle(cornerRadius: 12)`
 - When selected:
   - Blue glow shadow (accent color, 80% opacity, radius 12)
@@ -507,30 +503,19 @@ Displays a single app icon:
   - Scale up to 1.25×
 - Animation: `.easeInOut(0.12)` on `isSelected`
 
-## LanguageTileView
+## DictationTileView
 
-Displays a dictation-language tile. Visually mirrors `AppIconView` so both item types share the same affordances (rounded rect, selection glow, stroke, scale).
+Displays the single dictation tile. Visually mirrors `AppIconView` so both item types share the same affordances (rounded rect, selection glow, stroke, scale).
 
 - `RoundedRectangle(cornerRadius: 12)` filled with `.ultraThinMaterial`
-- Flag emoji centered as a `Text` at `size * 0.7`
-- Small bottom-right badge with the uppercased language subtag (e.g. `"EN"`, `"SV"`) in a black capsule — secondary signifier so flags aren't the only cue
+- `Image(systemName: "mic.fill")` centered, at `effectiveSize * 0.5`, `.medium` weight, `.primary` foreground. No flag and no locale badge: the tile is language-agnostic
+- Same `effectiveSize` rule as `AppIconView` (`isAnchored ? size * 1.2 : size`). The tile is always anchored in the real ring; the `isAnchored` parameter exists so `LayoutPreviewView` can render it unanchored
 - Same selection treatment as `AppIconView`: accent glow + stroke + `scaleEffect(1.25)`
-- Animation: `.easeInOut(0.12)` on `isSelected`
-
-## TranslateTileView
-
-Displays a translate tile alongside language tiles in the ring. Visual treatment matches `LanguageTileView` so both tile types share the same affordances.
-
-- `RoundedRectangle(cornerRadius: 12)` filled with `.ultraThinMaterial`
-- `HStack` centered in the tile: source flag emoji → `Image(systemName: "arrow.right")` → target flag emoji
-- Font sizes use multipliers of the effective tile size: source/target flags at `0.42×`, arrow icon at `0.22×` with `.semibold` weight, `HStack` spacing at `0.06×`
-- No locale badge — two flags carry the meaning without one
-- Same selection treatment as `AppIconView` and `LanguageTileView`: accent color glow shadow + stroke + `scaleEffect(1.25)`; anchored tiles get a `1.2×` size boost (`effectiveSize = isAnchored ? size * 1.2 : size`)
 - Animation: `.easeInOut(0.12)` on `isSelected`
 
 ## SettingsView
 
-A `TabView` with four tabs:
+A `TabView` with five tabs (Shortcut, Pinned, Apps, Dictation, Layout). The view sets `.frame(width: 520, height: 800)`; the window `AppDelegate` puts it in is 520x640, so the tab content is taller than the window. `onAppear` refreshes both the running-app list and the audio input device list.
 
 ### Shortcut Tab
 
@@ -559,37 +544,29 @@ A `TabView` with four tabs:
 
 ### Dictation Tab
 
-- **Master enable toggle**: "Show dictation languages in the ring" — bound to `SettingsService.dictationEnabled`. Off by default. Caption explains that selecting a tile starts on-device dictation in that language using a local Whisper model and that audio never leaves the Mac.
-- **Languages section** (visible only when enabled):
-  - Two language pickers ("Language 1" and "Language 2") populated from `DictationService.enabledLocales()`. Each includes a "None" option. Items render as "🇺🇸 English (US)".
-  - "Add more languages in System Settings…" button opens `x-apple.systempreferences:com.apple.preference.keyboard?Dictation` via `NSWorkspace.open`.
-  - "Refresh list" button re-reads the enabled locales.
+There are no language pickers and no model picker: Parakeet detects the language itself and Orbit ships one model.
+
+- **Master enable toggle**: "Show the dictation tile in the ring" - bound to `SettingsService.dictationEnabled`. Off by default. Caption explains that selecting the tile starts on-device dictation, that the spoken language is detected automatically, and that no audio leaves the Mac. Switching it on calls `SettingsService.ensureAnchorAngles()` so the tile has a ring slot the next time the ring opens.
 - **Speech model section** (visible only when enabled):
-  - Picker over `WhisperModelOption.all` (Tiny / Base / Small recommended / Medium / Large v3 Turbo / Large v3) bound to `SettingsService.dictationModelName`. Changing the picker either eagerly loads the new model (if already on disk) or flips `SpeechRecognitionService.modelStatus` to `.notDownloaded` so the status row exposes the Download button for the new selection.
-  - Description caption from the matching `WhisperModelOption.description`.
+  - Static name row showing `SpeechRecognitionService.modelDisplayName`, with a caption that it runs on-device via CoreML and covers 25 European languages with automatic language detection, punctuation and capitalization.
   - Status row driven by `SpeechRecognitionService.modelStatus`:
-    - `.notDownloaded` → orange "Not downloaded" with a "Download <label>" button that calls `downloadAndLoadModel`.
-    - `.downloading(progress, modelName)` → percentage label + linear `ProgressView`.
-    - `.loading(modelName)` → small spinner + "Loading <name>…".
-    - `.ready(modelName)` → green checkmark + "Ready (<name>)".
-    - `.error(message)` → red triangle, error text, and a Retry button.
-- **Status section** (visible only when enabled):
-  - Current dictation language row — shows `DictationService.currentLanguage()` or `—`.
-  - Explainer caption that recognition runs entirely on-device via WhisperKit, that macOS will prompt for microphone permission on first use, and how to stop a session (indicator click or ESC).
-  - "Microphone Privacy…" button that opens `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`.
-- **Microphone section** (always visible, outside the `if dictationEnabled` block):
+    - `.notDownloaded` → orange "Not downloaded" with a "Download Parakeet TDT 0.6B v3" button that calls `downloadAndLoadModel()`.
+    - `.downloading(progress)` → "Downloading…", percentage label, and a linear `ProgressView`.
+    - `.loading` → small spinner + "Loading…".
+    - `.ready` → green checkmark + "Ready".
+    - `.error(message)` → red triangle, the message, and a Retry button.
+  - Explainer caption that Orbit runs Parakeet TDT 0.6B v3 locally via FluidAudio (CoreML on Apple Silicon), that recognition bypasses the system Dictation HUD, that macOS will prompt for microphone permission on first use, and how to stop a session (indicator click or ESC). Followed by a "Microphone Privacy…" button that opens `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`.
+- **Microphone section** (always visible, outside the `if dictationEnabled` block, so the user can pre-configure the mic before enabling dictation):
   - Picker bound to `settings.dictationInputDeviceUID` (`String?`). First option is "System Default" tagged `nil`; remaining options come from `AudioInputDeviceService.listInputDevices()`, each tagged with `Optional(device.uid)` so the stable UID is persisted rather than the transient `AudioDeviceID`.
   - If the stored UID is not in the enumerated list (device disconnected), the picker shows an extra "⚠︎ Not connected (UID)" option so the user is not confused by an apparent silent reset. Selecting "System Default" writes `nil` and clears the warning.
   - "Refresh list" button re-enumerates devices and updates `availableInputDevices` state.
-  - Caption explains that this device is used for all dictation and translation, and that "System Default" follows the macOS audio input setting.
-  - Visible regardless of `dictationEnabled` or `translateTileEnabled` so the user can pre-configure their mic before enabling either feature.
-- **Translation section** (always visible, outside the `if dictationEnabled` block):
-  - Toggle "Show translate-to-English tile in Orbit ring" bound to `settings.translateTileEnabled`.
-  - Source language picker populated from `DictationService.enabledLocales()` filtered to non-English locales (`!id.hasPrefix("en")`), bound to `settings.translateSourceLocaleId`. Disabled when the toggle is off.
-  - When the filtered list is empty, the picker is replaced by an inline warning ("Enable a non-English dictation language in System Settings → Keyboard → Dictation first.") and an "Open Dictation Settings…" button.
-  - Caption explains that Orbit speaks in the selected language and transcribes/translates to English using Whisper.
-  - Toggling on triggers `SettingsService.ensureAnchorAngles(for:)` so the tile gets an angle on the next ring open.
-- Uses `.formStyle(.grouped)`. Enabled locales are loaded via `refreshDictationLocales()` in `onAppear`. The view holds an `@ObservedObject var speech = SpeechRecognitionService.shared` so model status updates re-render the status row live.
+  - Caption explains that this device is used for dictation and that "System Default" follows the macOS audio input setting.
+  - Below a `Divider`, a **Pause tolerance** slider bound to `settings.dictationSilenceTriggerSeconds`, range 0.5-3.0 in 0.1 steps, with the current value shown as e.g. "0.8s" in monospaced digits. Caption explains that it is how long Orbit waits in silence before transcribing, and that higher values let the user pause mid-sentence without fragmenting the output.
+- Uses `.formStyle(.grouped)`. The view holds an `@ObservedObject var speech = SpeechRecognitionService.shared` so model status updates re-render the status row live.
+
+### Layout Tab
+
+Hosts `LayoutPreviewView`, a 280pt circular preview of the ring showing every anchored item at 44pt (pinned apps by their `NSImage` icon, the dictation tile as a material rounded rect with `mic.fill`). Each anchor can be dragged around the circle; on release the angle snaps to the nearest 15° increment, and if that slot is within 5° of another anchor the search walks outward in 15° steps, alternating clockwise and counter-clockwise, until a free slot is found. The result is written back to `SettingsService.pinnedAngles` or `SettingsService.dictationAngle`. A "Reset to default layout" button calls `SettingsService.resetLayoutAngles()`. When nothing is anchored the preview shows "No anchored items yet. Pin an app or enable dictation to see them here."
 
 ### AppInfo Helper
 
@@ -620,15 +597,15 @@ A keyboard shortcut recorder:
 
 Key entries:
 
-| Key                             | Value                                                                                                                                        |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| LSUIElement                     | true (no Dock icon)                                                                                                                          |
-| NSAccessibilityUsageDescription | "Orbit needs accessibility access to monitor global keyboard shortcuts and switch between applications."                                     |
-| NSMicrophoneUsageDescription    | "Orbit captures microphone audio for on-device speech recognition when you select a language tile in the ring. Audio never leaves your Mac." |
-| NSMainNibFile                   | (empty string)                                                                                                                               |
-| NSPrincipalClass                | NSApplication                                                                                                                                |
+| Key                             | Value                                                                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| LSUIElement                     | true (no Dock icon)                                                                                                                             |
+| NSAccessibilityUsageDescription | "Orbit needs accessibility access to monitor global keyboard shortcuts and switch between applications."                                        |
+| NSMicrophoneUsageDescription    | "Orbit captures microphone audio for on-device speech recognition when you select the dictation tile in the ring. Audio never leaves your Mac." |
+| NSMainNibFile                   | (empty string)                                                                                                                                  |
+| NSPrincipalClass                | NSApplication                                                                                                                                   |
 
-`NSSpeechRecognitionUsageDescription` is intentionally absent — Orbit does not use `SFSpeechRecognizer`, only the microphone via `AVAudioEngine` plus WhisperKit's local CoreML pipeline.
+`NSSpeechRecognitionUsageDescription` is intentionally absent - Orbit does not use `SFSpeechRecognizer`, only the microphone via `AVAudioEngine` plus Parakeet's local CoreML pipeline.
 
 ## Entitlements
 

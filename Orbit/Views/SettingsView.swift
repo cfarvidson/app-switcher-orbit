@@ -1,66 +1,10 @@
 import Carbon
 import SwiftUI
 
-/// Catalog of WhisperKit models the user can pick from in Settings. The
-/// model identifier matches the `variant` argument WhisperKit's downloader
-/// expects (and corresponds to a folder in
-/// `argmaxinc/whisperkit-coreml` on Hugging Face).
-struct WhisperModelOption: Identifiable {
-    let id: String
-    let label: String
-    let description: String
-    /// Whether this model supports `task: .translate`. OpenAI's Turbo
-    /// variant (large-v3-turbo, dated v20240930) is fine-tuned for
-    /// transcription only and silently ignores translation requests,
-    /// so the translate tile produces source-language output if Turbo
-    /// is selected. All other models in the catalog support translation.
-    let supportsTranslation: Bool
-
-    static let all: [WhisperModelOption] = [
-        WhisperModelOption(
-            id: "openai_whisper-tiny",
-            label: "Tiny (~75 MB)",
-            description: "Fastest, lowest quality. Good for testing or very limited disk.",
-            supportsTranslation: true
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-base",
-            label: "Base (~150 MB)",
-            description: "Balanced. Decent quality, fast cold-start.",
-            supportsTranslation: true
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-small",
-            label: "Small (~500 MB) — recommended",
-            description: "Strong sweet spot for dictation. Good multilingual quality, real-time on Apple Silicon.",
-            supportsTranslation: true
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-medium",
-            label: "Medium (~1.5 GB)",
-            description: "High quality. Slower cold-start, more RAM. Best for difficult audio.",
-            supportsTranslation: true
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-large-v3-v20240930",
-            label: "Large v3 Turbo (~1.5 GB)",
-            description: "Apple's Whisper Turbo (Sep 2024) — large-v3 transcription quality at small-like speed. Transcription only — does NOT support the translate tile (Whisper's Turbo distillation removed translation). Use Large v3 if you need translation.",
-            supportsTranslation: false
-        ),
-        WhisperModelOption(
-            id: "openai_whisper-large-v3",
-            label: "Large v3 (~2.9 GB)",
-            description: "Full Whisper Large v3. Highest quality, but slower and more RAM than Turbo. Required if you need the translate tile (Turbo cannot translate).",
-            supportsTranslation: true
-        ),
-    ]
-}
-
 struct SettingsView: View {
     @ObservedObject var settings = SettingsService.shared
     @ObservedObject var speech = SpeechRecognitionService.shared
     @State private var allApps: [AppInfo] = []
-    @State private var enabledDictationLocales: [DictationLanguage] = []
     @State private var availableInputDevices: [AudioInputDeviceService.Device] = []
 
     var body: some View {
@@ -79,7 +23,6 @@ struct SettingsView: View {
         .frame(width: 520, height: 800)
         .onAppear {
             refreshApps()
-            refreshDictationLocales()
             refreshInputDevices()
         }
     }
@@ -305,79 +248,33 @@ struct SettingsView: View {
     private var dictationTab: some View {
         Form {
             Section {
-                Toggle("Show dictation languages in the ring", isOn: $settings.dictationEnabled)
-                    .onChange(of: settings.dictationEnabled) { settings.save() }
+                Toggle("Show the dictation tile in the ring", isOn: $settings.dictationEnabled)
+                    .onChange(of: settings.dictationEnabled) {
+                        settings.save()
+                        if settings.dictationEnabled {
+                            // Assign an angle now so the tile appears at a
+                            // sensible spot the next time the ring opens.
+                            settings.ensureAnchorAngles()
+                        }
+                    }
 
-                Text("When on, language tiles appear in the Orbit ring. Selecting one starts on-device dictation in that language using a local Whisper model. Recognition runs entirely inside Orbit — no audio leaves your Mac.")
+                Text("When on, a dictation tile appears in the Orbit ring. Selecting it starts on-device dictation. The spoken language is detected automatically. Recognition runs entirely inside Orbit - no audio leaves your Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             if settings.dictationEnabled {
-                Section("Languages") {
-                    if enabledDictationLocales.isEmpty {
-                        Text("No dictation languages are enabled in System Settings.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        dictationLanguagePicker(
-                            title: "Language 1",
-                            selection: $settings.dictationLanguage1Id
-                        )
-                        dictationLanguagePicker(
-                            title: "Language 2",
-                            selection: $settings.dictationLanguage2Id
-                        )
-                    }
-
-                    Button("Add more languages in System Settings\u{2026}") {
-                        openDictationSystemSettings()
-                    }
-                    .buttonStyle(.borderless)
-
-                    Button("Refresh list") { refreshDictationLocales() }
-                        .buttonStyle(.borderless)
-                }
-
                 Section("Speech model") {
-                    Picker("Model", selection: $settings.dictationModelName) {
-                        ForEach(WhisperModelOption.all) { option in
-                            Text(option.label).tag(option.id)
-                        }
-                    }
-                    .onChange(of: settings.dictationModelName) {
-                        settings.save()
-                        let newModel = settings.dictationModelName
-                        if speech.isModelDownloaded(newModel) {
-                            // Already on disk — load it eagerly so the next
-                            // dictation click is instant.
-                            Task { await speech.downloadAndLoadModel(newModel) }
-                        } else {
-                            // Not downloaded — flip the published status so
-                            // the status row shows the Download button for
-                            // the new selection (otherwise it would still
-                            // show the previously-loaded model's "Ready"
-                            // state, hiding the button).
-                            speech.modelStatus = .notDownloaded
-                        }
-                    }
-
-                    if let info = WhisperModelOption.all.first(where: { $0.id == settings.dictationModelName }) {
-                        Text(info.description)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(SpeechRecognitionService.modelDisplayName)
+                            .font(.body)
+                        Text("Runs on-device via CoreML. Covers 25 European languages with automatic language detection, punctuation and capitalization.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
                     speechModelStatusRow
-                }
 
-                Section("Status") {
-                    HStack {
-                        Text("Current dictation language")
-                        Spacer()
-                        Text(DictationService.currentLanguage() ?? "\u{2014}")
-                            .foregroundStyle(.secondary)
-                    }
                     dictationShortcutStatusRow
                 }
             }
@@ -403,7 +300,7 @@ struct SettingsView: View {
                 Button("Refresh list") { refreshInputDevices() }
                     .buttonStyle(.borderless)
 
-                Text("Orbit uses this microphone for all dictation and translation. \"System Default\" follows your macOS audio input setting.")
+                Text("Orbit uses this microphone for dictation. \"System Default\" follows your macOS audio input setting.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -419,65 +316,10 @@ struct SettingsView: View {
                     }
                     Slider(value: $settings.dictationSilenceTriggerSeconds, in: 0.5...3.0, step: 0.1)
                         .onChange(of: settings.dictationSilenceTriggerSeconds) { settings.save() }
-                    Text("How long Whisper waits in silence before transcribing what you've said. Higher values let you pause mid-sentence without fragmenting the output. Default 0.8s.")
+                    Text("How long Orbit waits in silence before transcribing what you've said. Higher values let you pause mid-sentence without fragmenting the output. Default 0.8s.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            }
-
-            Section("Translation") {
-                Toggle("Show translate-to-English tile in Orbit ring", isOn: $settings.translateTileEnabled)
-                    .onChange(of: settings.translateTileEnabled) {
-                        settings.save()
-                        if settings.translateTileEnabled {
-                            // Assign an angle now so the tile appears at a
-                            // sensible spot the next time the ring opens,
-                            // not at 0° / overlapping an existing item.
-                            settings.ensureAnchorAngles(for: settings.dictationLanguages)
-                        }
-                    }
-
-                if let currentModel = WhisperModelOption.all.first(where: { $0.id == settings.dictationModelName }),
-                   !currentModel.supportsTranslation
-                {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(currentModel.label) does not support translation.")
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                            Text("The translate tile will produce source-language text instead of English. Switch to Large v3 or a smaller multilingual model in the Speech model section above.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if translateSourceCandidates.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Enable a non-English dictation language in System Settings → Keyboard → Dictation first.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Button("Open Dictation Settings\u{2026}") {
-                            openDictationSystemSettings()
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                } else {
-                    Picker("Source language", selection: $settings.translateSourceLocaleId) {
-                        ForEach(translateSourceCandidates) { language in
-                            Text("\(language.flagEmoji)  \(language.displayName)")
-                                .tag(language.id)
-                        }
-                    }
-                    .disabled(!settings.translateTileEnabled)
-                    .onChange(of: settings.translateSourceLocaleId) { settings.save() }
-                }
-
-                Text("Speak in the selected language. Orbit transcribes and translates to English in real time using Whisper. The macOS system Dictation language is not affected.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -495,15 +337,15 @@ struct SettingsView: View {
                     Text("Not downloaded")
                         .foregroundStyle(.secondary)
                 }
-                Button("Download \(WhisperModelOption.all.first { $0.id == settings.dictationModelName }?.label ?? settings.dictationModelName)") {
-                    Task { await speech.downloadAndLoadModel(settings.dictationModelName) }
+                Button("Download \(SpeechRecognitionService.modelDisplayName)") {
+                    Task { await speech.downloadAndLoadModel() }
                 }
                 .buttonStyle(.bordered)
             }
-        case .downloading(let progress, let modelName):
+        case .downloading(let progress):
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Downloading \(modelName)\u{2026}")
+                    Text("Downloading\u{2026}")
                     Spacer()
                     Text("\(Int(progress * 100))%")
                         .foregroundStyle(.secondary)
@@ -512,19 +354,19 @@ struct SettingsView: View {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
             }
-        case .loading(let modelName):
+        case .loading:
             HStack {
                 ProgressView()
                     .scaleEffect(0.6)
                     .frame(width: 16, height: 16)
-                Text("Loading \(modelName)\u{2026}")
+                Text("Loading\u{2026}")
                     .foregroundStyle(.secondary)
             }
-        case .ready(let modelName):
+        case .ready:
             HStack {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(.green)
-                Text("Ready (\(modelName))")
+                Text("Ready")
                     .foregroundStyle(.secondary)
             }
         case .error(let message):
@@ -539,31 +381,17 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Retry") {
-                    Task { await speech.downloadAndLoadModel(settings.dictationModelName) }
+                    Task { await speech.downloadAndLoadModel() }
                 }
                 .buttonStyle(.bordered)
             }
         }
     }
 
-    private func dictationLanguagePicker(
-        title: String,
-        selection: Binding<String?>
-    ) -> some View {
-        Picker(title, selection: selection) {
-            Text("None").tag(String?.none)
-            ForEach(enabledDictationLocales) { language in
-                Text("\(language.flagEmoji)  \(language.displayName)")
-                    .tag(Optional(language.id))
-            }
-        }
-        .onChange(of: selection.wrappedValue) { settings.save() }
-    }
-
     @ViewBuilder
     private var dictationShortcutStatusRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Orbit runs OpenAI Whisper locally via WhisperKit (CoreML on Apple Silicon) — recognition is entirely on-device and bypasses the system Dictation HUD. macOS will prompt for microphone permission the first time you click a language tile. Click the floating indicator or press ESC to stop dictation.")
+            Text("Orbit runs Parakeet TDT 0.6B v3 locally via FluidAudio (CoreML on Apple Silicon) - recognition is entirely on-device and bypasses the system Dictation HUD. macOS will prompt for microphone permission the first time you start dictation. Click the floating indicator or press ESC to stop.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -578,26 +406,8 @@ struct SettingsView: View {
         }
     }
 
-    /// Non-English locales the user has enabled in System Settings, used to
-    /// populate the translate-source picker. The translate tile cannot have
-    /// English as its source — Whisper would just produce identical English
-    /// output, which is degenerate.
-    private var translateSourceCandidates: [DictationLanguage] {
-        enabledDictationLocales.filter { !$0.id.hasPrefix("en") }
-    }
-
-    private func refreshDictationLocales() {
-        enabledDictationLocales = DictationService.enabledLocales()
-    }
-
     private func refreshInputDevices() {
         availableInputDevices = AudioInputDeviceService.listInputDevices()
-    }
-
-    private func openDictationSystemSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.keyboard?Dictation") {
-            NSWorkspace.shared.open(url)
-        }
     }
 
     // MARK: - Helpers

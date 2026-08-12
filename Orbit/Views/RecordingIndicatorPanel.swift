@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Floating non-activating panel that appears near the cursor while
 /// `SpeechRecognitionService` is preparing or recording. Has three visible
-/// states: `loading` (Whisper model still being loaded/downloaded),
+/// states: `loading` (speech model still being loaded/downloaded),
 /// `starting` (model ready, waiting for the first audio buffer to confirm
 /// the engine is actually capturing), and `listening` (audio flowing).
 /// Click anywhere on the panel to stop.
@@ -40,16 +40,10 @@ final class RecordingIndicatorPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     func show(
-        localeId: String,
         state: State,
-        targetLocaleId: String? = nil,
         onStopTapped: @escaping () -> Void
     ) {
-        let model = RecordingIndicatorModel(
-            localeId: localeId,
-            targetLocaleId: targetLocaleId,
-            state: state
-        )
+        let model = RecordingIndicatorModel(state: state)
         self.model = model
         let view = RecordingIndicatorView(model: model, onStop: onStopTapped)
         let host = NSHostingView(rootView: view)
@@ -71,7 +65,7 @@ final class RecordingIndicatorPanel: NSPanel {
     }
 
     /// Update the indicator state in place (e.g. flip from `loading` to
-    /// `listening` once Whisper is ready). Cheap — just mutates the
+    /// `listening` once the model is ready). Cheap - just mutates the
     /// observable model the SwiftUI view is watching.
     func updateState(_ state: State) {
         model?.state = state
@@ -85,13 +79,9 @@ final class RecordingIndicatorPanel: NSPanel {
 /// Observable view-model so the indicator can flip from `loading` to
 /// `listening` without rebuilding the SwiftUI view tree.
 final class RecordingIndicatorModel: ObservableObject {
-    let localeId: String
-    let targetLocaleId: String?
     @Published var state: RecordingIndicatorPanel.State
 
-    init(localeId: String, targetLocaleId: String?, state: RecordingIndicatorPanel.State) {
-        self.localeId = localeId
-        self.targetLocaleId = targetLocaleId
+    init(state: RecordingIndicatorPanel.State) {
         self.state = state
     }
 }
@@ -100,40 +90,6 @@ private struct RecordingIndicatorView: View {
     @ObservedObject var model: RecordingIndicatorModel
     let onStop: () -> Void
     @State private var pulse: Bool = false
-
-    private var flagEmoji: String {
-        guard let region = model.localeId.split(separator: "_").last,
-              region.count == 2
-        else { return "🏳️" }
-        let base: UInt32 = 127397
-        var scalar = ""
-        for ch in region.uppercased().unicodeScalars {
-            if let combined = UnicodeScalar(base + ch.value) {
-                scalar.unicodeScalars.append(combined)
-            }
-        }
-        return scalar.isEmpty ? "🏳️" : scalar
-    }
-
-    private var targetFlagEmoji: String? {
-        guard let targetLocaleId = model.targetLocaleId,
-              let region = targetLocaleId.split(separator: "_").last,
-              region.count == 2
-        else { return nil }
-        let base: UInt32 = 127397
-        var scalar = ""
-        for ch in region.uppercased().unicodeScalars {
-            if let combined = UnicodeScalar(base + ch.value) {
-                scalar.unicodeScalars.append(combined)
-            }
-        }
-        return scalar.isEmpty ? nil : scalar
-    }
-
-    private var localeBadge: String {
-        guard let first = model.localeId.split(separator: "_").first else { return "" }
-        return (first.split(separator: "-").first.map(String.init) ?? String(first)).uppercased()
-    }
 
     private var isLoading: Bool {
         switch model.state {
@@ -152,7 +108,7 @@ private struct RecordingIndicatorView: View {
 
     private var hintText: String {
         switch model.state {
-        case .loading: return "First-time download \u{2014} please wait"
+        case .loading: return "Reading model into memory"
         case .starting: return "Almost ready\u{2026}"
         case .listening: return "Click or press ESC to stop"
         }
@@ -182,26 +138,11 @@ private struct RecordingIndicatorView: View {
             )
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(flagEmoji)
-                        .font(.system(size: 16))
-                    if let targetFlag = targetFlagEmoji {
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text(targetFlag)
-                            .font(.system(size: 16))
-                    } else {
-                        Text(localeBadge)
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.primary)
-                    }
-                    Text(statusText)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                Text(statusText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(hintText)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)

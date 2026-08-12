@@ -2,32 +2,33 @@ import AppKit
 import AVFoundation
 import CoreAudio
 import CoreGraphics
+import FluidAudio
 import Foundation
-import WhisperKit
 import os
 
-/// In-process speech recognition powered by WhisperKit (OpenAI Whisper
-/// running on Apple Silicon via CoreML).
+/// In-process speech recognition powered by Parakeet TDT 0.6B v3 (NVIDIA's
+/// transducer ASR running on Apple Silicon via CoreML, through the
+/// FluidAudio package).
 ///
-/// Replaces the previous `SFSpeechRecognizer` implementation, which had
-/// shallow language understanding: bad punctuation outside English, no
-/// auto-capitalization, and didn't model sentence boundaries from prosody.
-/// Whisper handles all 99 languages with proper punctuation and casing.
+/// Replaces the previous WhisperKit implementation. Parakeet reaches
+/// comparable transcription quality at 600M parameters instead of 1.55B,
+/// auto-detects language across 25 European languages, and emits
+/// punctuation and capitalization. It has no translation mode and takes no
+/// language parameter - both of which the surrounding UI used to expose.
 ///
 /// Pipeline:
 ///   1. `AVAudioEngine` taps the input node and accumulates samples in a
-///      ring buffer (16 kHz mono float, the format Whisper expects).
-///   2. Every `transcribeInterval` seconds we hand the accumulated buffer
-///      to `WhisperKit.transcribe(audioArray:decodeOptions:)`.
+///      ring buffer (16 kHz mono float, the format Parakeet expects).
+///   2. Voice activity detection flushes the buffer to
+///      `AsrManager.transcribe(_:decoderState:)` once the user
+///      pauses (see the VAD section below).
 ///   3. When the resulting transcript extends what we've already injected,
 ///      we type the new portion via `CGEvent.keyboardSetUnicodeString`.
 ///   4. ESC or any other physical keypress stops the session. Click on the
 ///      indicator stops it. Re-triggering Orbit stops it.
 ///
-/// Lazy model load: WhisperKit downloads its CoreML model on first init
-/// (~150 MB for "base", ~500 MB for "small"). The model name comes from
-/// `SettingsService.dictationModelName` so the user can pick their tradeoff
-/// in Settings.
+/// Lazy model load: FluidAudio downloads the Parakeet CoreML model bundle on
+/// first use. There is only one supported model.
 final class SpeechRecognitionService: ObservableObject {
     static let shared = SpeechRecognitionService()
 
@@ -36,24 +37,26 @@ final class SpeechRecognitionService: ObservableObject {
     /// Model lifecycle state, observable from SwiftUI Settings views.
     enum ModelStatus: Equatable {
         case notDownloaded
-        case downloading(progress: Double, modelName: String)  // 0..1
-        case loading(modelName: String)
-        case ready(modelName: String)
+        case downloading(progress: Double)  // 0..1
+        case loading
+        case ready
         case error(String)
     }
 
     @Published var modelStatus: ModelStatus = .notDownloaded
 
-    // MARK: - WhisperKit setup
+    // MARK: - Parakeet setup
 
-    private var whisperKit: WhisperKit?
-    private var whisperKitLoading: Bool = false
-    private var loadedModelName: String?
+    /// Display name for the one and only supported model. Shown in Settings.
+    static let modelDisplayName = "Parakeet TDT 0.6B v3"
+
+    private var asrManager: AsrManager?
+    private var modelsLoading: Bool = false
 
     // MARK: - Audio capture
 
     private let audioEngine = AVAudioEngine()
-    /// Whisper expects 16 kHz mono float samples. AVAudioEngine's default
+    /// Parakeet expects 16 kHz mono float samples. AVAudioEngine's default
     /// input format is the device sample rate; we convert via AVAudioConverter.
     private var converter: AVAudioConverter?
     private let targetSampleRate: Double = 16_000
@@ -62,8 +65,8 @@ final class SpeechRecognitionService: ObservableObject {
 
     // MARK: - Voice activity detection (VAD-based chunking)
     //
-    // We don't transcribe on a fixed timer because Whisper re-transcribes
-    // the whole buffer each pass with more context, so the result drifts
+    // We don't transcribe on a fixed timer because re-transcribing the
+    // whole buffer each pass with more context makes the result drift
     // (e.g. "stad oskiven omting" → "starta och skriva någonting"). Instead
     // we wait for the user to pause, transcribe the captured utterance once,
     // inject it cleanly, and reset the buffer for the next utterance.
@@ -77,6 +80,14 @@ final class SpeechRecognitionService: ObservableObject {
     /// gain — quiet speech still passes, baseline room noise doesn't.
     private let speechRmsThreshold: Float = 0.012
     /// Minimum buffered speech duration before we bother transcribing.
+    /// This equals FluidAudio's `ASRConstants.minimumAudioDurationSeconds` -
+    /// `AsrManager.transcribe` throws `ASRError.invalidAudioData` for
+    /// anything shorter (see `AsrManager+Transcription.swift`). The two
+    /// pre-flight guards that gate a transcribe call (`flushAndTranscribe`
+    /// and `stop(reason:flushBuffer:)`) both compare with strict `>`, so
+    /// today's value is safe by exactly one sample. Lowering this to catch
+    /// shorter utterances would make every such flush throw into a catch
+    /// that only logs.
     private let minSpeechSeconds: Double = 0.3
     /// Hard cap on the audio buffer to prevent runaway memory if VAD never
     /// triggers (e.g. user holds an "uhhhhh"). 25s is plenty for any
@@ -104,9 +115,6 @@ final class SpeechRecognitionService: ObservableObject {
     private var lastInjectionTime: CFTimeInterval = 0
     private let injectionGracePeriod: CFTimeInterval = 0.25
 
-    private var currentLocaleId: String = "en_US"
-    private var currentTask: DecodingTask = .transcribe
-    private var currentTranslationTargetId: String?
     private var hasReceivedFirstAudioBuffer: Bool = false
 
     /// Circular buffer holding the most recent ~2 seconds of audio captured
@@ -134,52 +142,27 @@ final class SpeechRecognitionService: ObservableObject {
     /// only happen when the user explicitly clicks "Download" in Settings,
     /// so the user always knows what's happening on the network.
     func prewarm() {
-        let modelName = SettingsService.shared.dictationModelName
-        guard isModelDownloaded(modelName) else {
-            NSLog("[Orbit.speech] prewarm skipped — model \(modelName) not downloaded")
+        guard isModelDownloaded() else {
+            NSLog("[Orbit.speech] prewarm skipped - Parakeet model not downloaded")
             modelStatus = .notDownloaded
             return
         }
         Task { @MainActor in
-            await downloadAndLoadModel(modelName)
+            await downloadAndLoadModel()
         }
     }
 
-    /// Start a regular (non-translating) dictation session in `localeId`.
-    /// Whisper transcribes audio in the same language and pastes the
-    /// transcript into the frontmost app.
-    func startDictation(localeId: String, onError: @escaping (String) -> Void = { _ in }) {
-        startInternal(
-            localeId: localeId,
-            task: .transcribe,
-            targetLocaleIdForDisplay: nil,
-            onError: onError
-        )
-    }
-
-    /// Start a translation session: Whisper takes audio in `sourceLocaleId`
-    /// and pastes English text into the frontmost app. The `targetLocaleId`
-    /// is purely cosmetic — it controls which `en_*` flag the recording
-    /// indicator displays. Whisper itself ignores it (its `.translate` task
-    /// always outputs English).
-    func startTranslation(
-        sourceLocaleId: String,
-        targetLocaleId: String,
-        onError: @escaping (String) -> Void = { _ in }
-    ) {
-        startInternal(
-            localeId: sourceLocaleId,
-            task: .translate,
-            targetLocaleIdForDisplay: targetLocaleId,
-            onError: onError
-        )
+    /// Start a dictation session. Parakeet detects the spoken language on
+    /// its own, so there is nothing to configure per session.
+    func startDictation(onError: @escaping (String) -> Void = { _ in }) {
+        startInternal(onError: onError)
     }
 
     /// Starts the audio engine in warmup mode without showing an indicator
     /// or committing to a session. Fills a circular preroll buffer with
-    /// recent audio so a subsequent `startDictation` / `startTranslation`
-    /// call can promote the warmup into an active session with the
-    /// last ~2 seconds of audio already captured.
+    /// recent audio so a subsequent `startDictation` call can promote the
+    /// warmup into an active session with the last ~2 seconds of audio
+    /// already captured.
     ///
     /// Idempotent — calling while warmup or a session is already running
     /// is a no-op. Silently does nothing if mic permission is not granted
@@ -270,12 +253,7 @@ final class SpeechRecognitionService: ObservableObject {
         NSLog("[Orbit.speech] warmup cancelled")
     }
 
-    private func startInternal(
-        localeId: String,
-        task: DecodingTask,
-        targetLocaleIdForDisplay: String?,
-        onError: @escaping (String) -> Void
-    ) {
+    private func startInternal(onError: @escaping (String) -> Void) {
         let now = CACurrentMediaTime()
         if starting || (now - lastStartTime) < startLockout {
             NSLog("[Orbit.speech] start() suppressed (starting=\(starting), since-last=\(Int((now - lastStartTime) * 1000))ms)")
@@ -288,28 +266,21 @@ final class SpeechRecognitionService: ObservableObject {
             stop()
         }
 
-        currentLocaleId = localeId
-        currentTask = task
-        currentTranslationTargetId = targetLocaleIdForDisplay
-
         // Hard pre-flight: if the model isn't downloaded yet, refuse to
         // start and tell the user where to set it up. We never trigger
         // automatic downloads from a tile click — downloads happen only
         // from Settings → Dictation so the user is aware of the network
         // activity and disk usage.
-        let modelName = SettingsService.shared.dictationModelName
-        guard isModelDownloaded(modelName) else {
-            NSLog("[Orbit.speech] start aborted — model \(modelName) not downloaded")
+        guard isModelDownloaded() else {
+            NSLog("[Orbit.speech] start aborted - Parakeet model not downloaded")
             starting = false
-            currentTask = .transcribe
-            currentTranslationTargetId = nil
             onError("Speech model not downloaded. Set it up in Settings → Dictation.")
             showSetupReminderNotification()
             return
         }
 
         // Replace any existing indicator so we anchor near the user's
-        // current cursor and use the right locale.
+        // current cursor.
         if indicatorPanel != nil {
             indicatorPanel?.hideIndicator()
             indicatorPanel = nil
@@ -318,8 +289,8 @@ final class SpeechRecognitionService: ObservableObject {
         // Show the indicator immediately so the user gets feedback. The
         // model is downloaded but might still be loading into RAM.
         let initialState: RecordingIndicatorPanel.State =
-            (whisperKit == nil) ? .loading(message: "Loading model\u{2026}") : .listening
-        showIndicator(localeId: localeId, state: initialState)
+            (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .listening
+        showIndicator(state: initialState)
 
         ensurePermissions { [weak self] granted in
             guard let self else { return }
@@ -335,13 +306,13 @@ final class SpeechRecognitionService: ObservableObject {
                 return
             }
             Task { @MainActor in
-                await self.ensureWhisperKitLoaded(onError: onError)
-                if self.whisperKit != nil {
+                await self.ensureModelsLoaded(onError: onError)
+                if self.asrManager != nil {
                     if self.warmupActive {
-                        self.promoteWarmupToSession(localeId: localeId)
+                        self.promoteWarmupToSession()
                     } else {
                         self.indicatorPanel?.updateState(.starting)
-                        self.beginCapture(localeId: localeId, onError: onError)
+                        self.beginCapture(onError: onError)
                     }
                 }
                 self.starting = false
@@ -356,7 +327,7 @@ final class SpeechRecognitionService: ObservableObject {
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.messageText = "Dictation needs setup"
-            alert.informativeText = "Open Orbit Settings → Dictation and download a speech model before using the language tiles."
+            alert.informativeText = "Open Orbit Settings → Dictation and download a speech model before using the dictation tile."
             alert.alertStyle = .warning
             alert.addButton(withTitle: "Open Settings\u{2026}")
             alert.addButton(withTitle: "Cancel")
@@ -367,7 +338,7 @@ final class SpeechRecognitionService: ObservableObject {
         }
     }
 
-    /// Shown when the user clicks a language tile but has previously denied
+    /// Shown when the user clicks the dictation tile but has previously denied
     /// microphone access. Without this the failure is silent — Orbit just
     /// dismisses and nothing happens, which is the symptom of "dictation
     /// doesn't work" most users hit after a rebuild invalidates TCC.
@@ -443,7 +414,7 @@ final class SpeechRecognitionService: ObservableObject {
         // dispatched so multi-utterance sessions still get the leading
         // space treatment for the last chunk.
         // The `!transcribing` clause: if a VAD-triggered flushAndTranscribe
-        // Task is already in flight (the user spoke, VAD fired, Whisper is
+        // Task is already in flight (the user spoke, VAD fired, Parakeet is
         // mid-decode), we skip the final flush here. The original Task will
         // still inject its transcript when it completes, so the audio that
         // triggered VAD is NOT lost. What we discard is whatever fragment
@@ -453,32 +424,19 @@ final class SpeechRecognitionService: ObservableObject {
         // accept losing that fragment in exchange for never producing
         // garbled half-word output at session end.
         let minSamples = Int(targetSampleRate * minSpeechSeconds)
-        if flushBuffer, hadSpeech, finalSnapshot.count > minSamples, let kit = whisperKit, !transcribing {
-            let bcp47 = currentLocaleId
-                .replacingOccurrences(of: "_", with: "-")
-                .lowercased()
-            let language = String(bcp47.split(separator: "-").first ?? "en")
-            let capturedTask = currentTask  // Snapshot before reset below races the async task.
-            NSLog("[Orbit.speech] stop: final flush \(String(format: "%.2f", Double(finalSnapshot.count) / targetSampleRate))s audio (\(language), task=\(capturedTask))")
+        if flushBuffer, hadSpeech, finalSnapshot.count > minSamples, let manager = asrManager, !transcribing {
+            NSLog("[Orbit.speech] stop: final flush \(String(format: "%.2f", Double(finalSnapshot.count) / targetSampleRate))s audio")
             transcribing = true
             Task { [weak self] in
                 guard let self else { return }
                 do {
-                    let options = DecodingOptions(
-                        verbose: false,
-                        task: capturedTask,
-                        language: language,
-                        temperature: 0,
-                        temperatureFallbackCount: 5,
-                        skipSpecialTokens: true,
-                        withoutTimestamps: true,
-                        noSpeechThreshold: 0.5
-                    )
-                    let results = try await kit.transcribe(audioArray: finalSnapshot, decodeOptions: options)
-                    let text = results
-                        .map(\.text)
-                        .joined(separator: " ")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Fresh decoder state per utterance: each flush is a
+                    // complete, independent utterance (see the VAD comment
+                    // above), so there's no continuity to carry across calls.
+                    let decoderLayers = await manager.decoderLayerCount
+                    var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
+                    let result = try await manager.transcribe(finalSnapshot, decoderState: &decoderState)
+                    let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     await MainActor.run {
                         self.handleFlushedTranscript(text)
                         self.injectedSoFar = ""
@@ -495,41 +453,14 @@ final class SpeechRecognitionService: ObservableObject {
         } else {
             injectedSoFar = ""
         }
-        // Reset task state AFTER the final-flush block so capturedTask above
-        // reads the session's actual task, not the post-reset value.
-        currentTask = .transcribe
-        currentTranslationTargetId = nil
     }
 
     // MARK: - Model availability + download
 
-    /// Returns true if the model files for `modelName` are present in the
-    /// local cache. Doesn't trigger any network or load. Used by the
-    /// Settings UI to decide whether to show a "Download" button.
-    func isModelDownloaded(_ modelName: String) -> Bool {
-        let cacheURL = SpeechRecognitionService.modelFolderURL(for: modelName)
-        // The folder exists with at least one .mlmodelc inside means the
-        // download completed.
-        guard let folder = cacheURL,
-              let entries = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
-        else { return false }
-        return entries.contains { $0.hasSuffix(".mlmodelc") || $0.hasSuffix(".mlpackage") }
-    }
-
-    /// Conventional location WhisperKit / huggingface-swift caches models.
-    /// We compute the same path so `isModelDownloaded` and our own load
-    /// path agree on where to look.
-    private static func modelFolderURL(for modelName: String) -> URL? {
-        guard let documents = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        ).first else { return nil }
-        return documents
-            .appendingPathComponent("huggingface")
-            .appendingPathComponent("models")
-            .appendingPathComponent("argmaxinc")
-            .appendingPathComponent("whisperkit-coreml")
-            .appendingPathComponent(modelName)
+    /// Returns true if the Parakeet model files are present in FluidAudio's
+    /// cache. Doesn't trigger any network or load.
+    func isModelDownloaded() -> Bool {
+        AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory(for: .v3), version: .v3)
     }
 
     /// Public entry point used by the Settings UI. Downloads the model if
@@ -537,63 +468,44 @@ final class SpeechRecognitionService: ObservableObject {
     /// `modelStatus` throughout the lifecycle. Idempotent — calling while a
     /// download is already in flight is a no-op.
     @MainActor
-    func downloadAndLoadModel(_ modelName: String) async {
-        if whisperKitLoading { return }
-        // Different model than what's currently loaded → release the old one.
-        if loadedModelName != nil, loadedModelName != modelName {
-            whisperKit = nil
-            loadedModelName = nil
-        }
-        // Already loaded → done.
-        if whisperKit != nil, loadedModelName == modelName {
-            modelStatus = .ready(modelName: modelName)
+    func downloadAndLoadModel() async {
+        if modelsLoading { return }
+        if asrManager != nil {
+            modelStatus = .ready
             return
         }
-        whisperKitLoading = true
-        defer { whisperKitLoading = false }
+        modelsLoading = true
+        defer { modelsLoading = false }
 
         do {
-            // Step 1: download (with progress) if not already cached. The
-            // download() call internally checks the cache and is fast for
-            // already-downloaded models.
-            modelStatus = .downloading(progress: 0, modelName: modelName)
-            NSLog("[Orbit.speech] starting download of \(modelName)…")
-            let folderURL = try await WhisperKit.download(
-                variant: modelName,
-                from: "argmaxinc/whisperkit-coreml",
-                progressCallback: { [weak self] progress in
-                    Task { @MainActor in
-                        self?.modelStatus = .downloading(
-                            progress: progress.fractionCompleted,
-                            modelName: modelName
-                        )
-                    }
+            modelStatus = .downloading(progress: 0)
+            NSLog("[Orbit.speech] downloading/loading \(Self.modelDisplayName)…")
+            let models = try await AsrModels.downloadAndLoad(version: .v3) { progress in
+                Task { @MainActor in
+                    self.modelStatus = .downloading(progress: progress.fractionCompleted)
                 }
-            )
-            // Step 2: load WhisperKit from the local folder.
-            modelStatus = .loading(modelName: modelName)
-            NSLog("[Orbit.speech] download complete, loading WhisperKit from \(folderURL.path)")
-            let config = WhisperKitConfig(modelFolder: folderURL.path)
-            let kit = try await WhisperKit(config)
-            whisperKit = kit
-            loadedModelName = modelName
-            modelStatus = .ready(modelName: modelName)
-            NSLog("[Orbit.speech] WhisperKit ready (\(modelName))")
+            }
+            modelStatus = .loading
+            let manager = AsrManager(config: .default)
+            try await manager.loadModels(models)
+            asrManager = manager
+            modelStatus = .ready
+            NSLog("[Orbit.speech] Parakeet ready")
         } catch {
             NSLog("[Orbit.speech] downloadAndLoadModel failed: \(error)")
+            asrManager = nil
             modelStatus = .error(error.localizedDescription)
         }
     }
 
-    // MARK: - WhisperKit lazy load (during dictation start)
+    // MARK: - Parakeet lazy load (during dictation start)
 
     @MainActor
-    private func ensureWhisperKitLoaded(onError: @escaping (String) -> Void) async {
-        let target = SettingsService.shared.dictationModelName
-        if whisperKit != nil, loadedModelName == target { return }
-        await downloadAndLoadModel(target)
-        if whisperKit == nil {
-            onError("Failed to load Whisper model. Set up dictation in Settings → Dictation.")
+    private func ensureModelsLoaded(onError: @escaping (String) -> Void) async {
+        if asrManager != nil { return }
+        await downloadAndLoadModel()
+        if asrManager == nil {
+            onError("Failed to load the Parakeet model. Set up dictation in Settings → Dictation.")
             indicatorPanel?.hideIndicator()
             indicatorPanel = nil
         }
@@ -623,7 +535,7 @@ final class SpeechRecognitionService: ObservableObject {
     /// preroll into the session buffer, flip the mode flag, and update the
     /// indicator. The next audio tap callback will write to `audioBuffer`
     /// instead of `prerollBuffer`.
-    private func promoteWarmupToSession(localeId: String) {
+    private func promoteWarmupToSession() {
         audioBufferQueue.sync {
             audioBuffer.removeAll(keepingCapacity: true)
             audioBuffer.append(contentsOf: prerollBuffer)
@@ -640,10 +552,10 @@ final class SpeechRecognitionService: ObservableObject {
         // The engine has been delivering buffers since warmup; flip indicator
         // straight to .listening (skip the .starting state, no startup gap).
         indicatorPanel?.updateState(.listening)
-        NSLog("[Orbit.speech] promoted warmup to session for locale \(localeId), preroll=\(audioBuffer.count) samples")
+        NSLog("[Orbit.speech] promoted warmup to session, preroll=\(audioBuffer.count) samples")
     }
 
-    private func beginCapture(localeId: String, onError: @escaping (String) -> Void) {
+    private func beginCapture(onError: @escaping (String) -> Void) {
         // Configure input device BEFORE reading inputNode.outputFormat — the
         // format depends on whichever device the input unit is bound to, and
         // the tap install below uses that format. The user's stored UID is
@@ -681,7 +593,7 @@ final class SpeechRecognitionService: ObservableObject {
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
 
-        // Whisper wants 16 kHz mono Float32. Build a converter from whatever
+        // Parakeet wants 16 kHz mono Float32. Build a converter from whatever
         // the input device gives us.
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -714,7 +626,7 @@ final class SpeechRecognitionService: ObservableObject {
         installEscMonitor()
         scheduleHardCap()
         isRunning = true
-        NSLog("[Orbit.speech] capture started for locale \(localeId)")
+        NSLog("[Orbit.speech] capture started")
     }
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, targetFormat: AVAudioFormat) {
@@ -820,10 +732,10 @@ final class SpeechRecognitionService: ObservableObject {
         return (sum / Float(samples.count)).squareRoot()
     }
 
-    /// Hand the currently buffered audio to Whisper, then clear the buffer
+    /// Hand the currently buffered audio to Parakeet, then clear the buffer
     /// and reset the VAD state for the next utterance.
     private func flushAndTranscribe() {
-        guard isRunning, !transcribing, let kit = whisperKit else { return }
+        guard isRunning, !transcribing, let manager = asrManager else { return }
 
         let snapshot: [Float] = audioBufferQueue.sync {
             let copy = audioBuffer
@@ -836,37 +748,18 @@ final class SpeechRecognitionService: ObservableObject {
         guard snapshot.count > Int(targetSampleRate * minSpeechSeconds) else { return }
 
         transcribing = true
-        let bcp47 = currentLocaleId
-            .replacingOccurrences(of: "_", with: "-")
-            .lowercased()
-        let language = String(bcp47.split(separator: "-").first ?? "en")  // "en", "sv", etc.
-
-        NSLog("[Orbit.speech] flushing \(Double(snapshot.count) / targetSampleRate)s of audio for transcription (\(language))")
+        NSLog("[Orbit.speech] flushing \(Double(snapshot.count) / targetSampleRate)s of audio for transcription")
 
         Task { [weak self] in
             guard let self else { return }
             do {
-                let options = DecodingOptions(
-                    verbose: false,
-                    task: currentTask,
-                    language: language,
-                    temperature: 0,
-                    // If a chunk decodes with low confidence at temperature
-                    // 0, retry with progressively higher temperature up to
-                    // 5 times. Lets Whisper recover from tricky audio
-                    // (background noise, fast speech, accents).
-                    temperatureFallbackCount: 5,
-                    skipSpecialTokens: true,
-                    withoutTimestamps: true,
-                    // Lower threshold means we suppress less aggressively,
-                    // letting quieter speech through.
-                    noSpeechThreshold: 0.5
-                )
-                let results = try await kit.transcribe(audioArray: snapshot, decodeOptions: options)
-                let text = results
-                    .map(\.text)
-                    .joined(separator: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                // Fresh decoder state per utterance: each flush is a
+                // complete, independent utterance (see the VAD comment
+                // above), so there's no continuity to carry across calls.
+                let decoderLayers = await manager.decoderLayerCount
+                var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
+                let result = try await manager.transcribe(snapshot, decoderState: &decoderState)
+                let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 await MainActor.run {
                     self.handleFlushedTranscript(text)
                     self.transcribing = false
@@ -888,21 +781,16 @@ final class SpeechRecognitionService: ObservableObject {
         guard !transcript.isEmpty else { return }
         NSLog("[Orbit.speech] flushed transcript=\(transcript)")
 
-        // Whisper sometimes emits boilerplate ("[Music]", "Thanks for
-        // watching!", etc.) on quiet/noisy buffers. Filter the most common
-        // ones — they're recognizable by being wrapped in brackets or by
-        // exact-match against a small list.
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") { return }
         if trimmed.hasPrefix("(") && trimmed.hasSuffix(")") { return }
-        let lower = trimmed.lowercased()
-        if SpeechRecognitionService.boilerplateBlocklist.contains(lower) { return }
 
-        // Strip ellipsis. Whisper inserts "..." or "…" whenever the speaker
-        // pauses mid-sentence (interpreted as trailing-off). For dictation
-        // this just pollutes natural speech with ellipsis the user didn't
-        // intend. We strip both the ASCII three-dot form and the Unicode
-        // single-glyph form, then collapse any resulting double-spaces.
+        // Strip ellipsis in case the model emits "..." or "…" when the
+        // speaker pauses mid-sentence (interpreted as trailing-off). For
+        // dictation this just pollutes natural speech with ellipsis the
+        // user didn't intend. We strip both the ASCII three-dot form and
+        // the Unicode single-glyph form, then collapse any resulting
+        // double-spaces.
         let cleaned = trimmed
             .replacingOccurrences(of: "...", with: "")
             .replacingOccurrences(of: "\u{2026}", with: "")
@@ -916,22 +804,6 @@ final class SpeechRecognitionService: ObservableObject {
         injectText(toInject)
         injectedSoFar += toInject
     }
-
-    /// Common Whisper hallucinations on silence/noise. We've all seen
-    /// "Thanks for watching!" appear in unexpected places.
-    private static let boilerplateBlocklist: Set<String> = [
-        "thanks for watching!",
-        "thanks for watching",
-        "thank you for watching.",
-        "thank you for watching",
-        "you",
-        ".",
-        "...",
-        "music",
-        "applause",
-        "[music]",
-        "[applause]",
-    ]
 
     private func injectText(_ text: String) {
         guard !text.isEmpty,
@@ -1020,9 +892,10 @@ final class SpeechRecognitionService: ObservableObject {
     private func installEscMonitor() {
         // ESC-only stop. The "stop on any keypress" variant was killing
         // legitimate dictation sessions whenever any incidental keystroke
-        // arrived between audio capture and Whisper finishing transcription
-        // (~600ms latency). Users who want to switch from dictation to
-        // typing should press ESC, click the indicator, or re-trigger Orbit.
+        // arrived between audio capture and the model finishing
+        // transcription (~600ms latency). Users who want to switch from
+        // dictation to typing should press ESC, click the indicator, or
+        // re-trigger Orbit.
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return }
             if event.keyCode != 53 { return }  // kVK_Escape
@@ -1042,13 +915,9 @@ final class SpeechRecognitionService: ObservableObject {
 
     // MARK: - Indicator
 
-    private func showIndicator(localeId: String, state: RecordingIndicatorPanel.State) {
+    private func showIndicator(state: RecordingIndicatorPanel.State) {
         let panel = RecordingIndicatorPanel()
-        panel.show(
-            localeId: localeId,
-            state: state,
-            targetLocaleId: currentTranslationTargetId
-        ) { [weak self] in
+        panel.show(state: state) { [weak self] in
             DispatchQueue.main.async { self?.stop(reason: "indicator click") }
         }
         indicatorPanel = panel

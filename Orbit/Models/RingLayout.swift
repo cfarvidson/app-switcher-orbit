@@ -3,7 +3,7 @@ import Foundation
 /// Pure-data layout engine for the Orbit ring.
 ///
 /// Produces a clockwise-sorted list of `Positioned` items given the
-/// user-configured anchored items (pinned apps + dictation languages) with
+/// user-configured anchored items (pinned apps + the dictation tile) with
 /// their stored angles, plus the set of non-pinned running apps that need to
 /// fill the gaps between anchors.
 ///
@@ -135,6 +135,11 @@ enum RingLayout {
     /// largest empty arc. If no anchors exist yet, returns 0 (12 o'clock).
     /// If anchors do exist but their angles are all set, finds the largest
     /// gap between consecutive anchors and returns its midpoint.
+    ///
+    /// Duplicate angles in `existingAngles` are tolerated. They occur in
+    /// practice: two pinned apps can end up sharing an angle, and `compute`
+    /// has no duplicate handling, so it renders them stacked on the same
+    /// point. A new anchor must not be placed on top of them as well.
     static func nextAnchorAngle(existingAngles: [Double]) -> Double {
         if existingAngles.isEmpty { return 0 }
 
@@ -149,12 +154,20 @@ enum RingLayout {
         for i in 0..<sorted.count {
             let next = sorted[(i + 1) % sorted.count]
             let raw = next - sorted[i]
-            let size = raw > 0 ? raw : raw + 360
+            // Only a negative difference is the wrap past 12 o'clock and needs
+            // +360. A zero difference means two anchors share an angle; adding
+            // 360 there would report the narrowest possible gap as the widest
+            // one and hand the caller a midpoint sitting on top of an existing
+            // anchor.
+            let size = raw < 0 ? raw + 360 : raw
             if size > bestSize {
                 bestSize = size
                 bestStart = sorted[i]
             }
         }
+        // Every anchor is at the same angle, so there is no empty arc to
+        // measure. Opposite is the only placement that is not a collision.
+        guard bestSize > 0 else { return normalize(sorted[0] + 180) }
         return normalize(bestStart + bestSize / 2)
     }
 
