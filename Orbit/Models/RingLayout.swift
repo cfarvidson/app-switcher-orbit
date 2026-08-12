@@ -2,14 +2,20 @@ import Foundation
 
 /// Pure-data layout engine for the Orbit ring.
 ///
-/// Produces a clockwise-sorted list of `Positioned` items given the
-/// user-configured anchored items (pinned apps + the dictation tile) with
-/// their stored angles, plus the set of non-pinned running apps that need to
-/// fill the gaps between anchors.
+/// The ring is always evenly divided: `n` items means `n` slots, slot `i` at
+/// `i * 360/n` degrees. Slot 0 is always twelve o'clock, so a preference of 0
+/// always resolves to the top no matter how many apps are running.
 ///
-/// Angles are in degrees with 0° at the 12 o'clock position, increasing
-/// clockwise. This matches what users expect when they think "position on a
-/// clock face" and what `LayoutPreviewView` renders during the drag UI.
+/// Pinned apps and the dictation tile carry a *preferred direction*, not a
+/// position. Each claims the free slot nearest its preference; everything
+/// else fills what is left. This is what keeps the ring evenly spaced no
+/// matter how many apps macOS reports as running, which fixed-angle anchors
+/// could not do - clustered pins used to cram together and smear every
+/// auto-added app across the remaining arc.
+///
+/// Angles are degrees with 0 at twelve o'clock, increasing clockwise. Output
+/// is sorted clockwise from twelve, so the returned indices drive
+/// scroll-to-rotate, arrow-key navigation and selection math unchanged.
 enum RingLayout {
     struct Positioned: Equatable {
         let item: OrbitItem
@@ -17,116 +23,92 @@ enum RingLayout {
         let isAnchored: Bool
     }
 
-    /// Lay out `anchoredItems` at their stored angles and distribute
-    /// `nonPinned` items proportionally across the gaps between them.
-    ///
-    /// Output is sorted clockwise from 12 o'clock, so the returned indices can
-    /// drive scroll-to-rotate, arrow-key navigation, and selection math
-    /// exactly the same way as the previous even-distribution behavior.
+    /// Resolve `preferred` items onto the evenly spaced slot nearest each one's
+    /// preferred direction, and fill every remaining slot with `others` in the
+    /// order given.
     static func compute(
-        anchoredItems: [(item: OrbitItem, angleDegrees: Double)],
-        nonPinned: [OrbitItem]
+        preferred: [(item: OrbitItem, preferredAngle: Double)],
+        others: [OrbitItem]
     ) -> [Positioned] {
-        // No anchors at all → fall back to even distribution. This preserves
-        // today's behavior for users who haven't configured any pinned apps
-        // and haven't enabled dictation.
-        if anchoredItems.isEmpty {
-            return evenDistribution(nonPinned)
+        let n = preferred.count + others.count
+        guard n > 0 else { return [] }
+
+        let step = 360.0 / Double(n)
+        var slots: [Positioned?] = Array(repeating: nil, count: n)
+
+        /// A preferred item's bid for a slot. `residual` is how far the
+        /// preference sits from the slot it would ideally take.
+        struct Claim {
+            let item: OrbitItem
+            let idealSlot: Int
+            let residual: Double
+            let normalizedAngle: Double
         }
 
-        // Normalize angles to [0, 360) and sort clockwise.
-        let anchors = anchoredItems
-            .map { ($0.item, normalize($0.angleDegrees)) }
-            .sorted { $0.1 < $1.1 }
-
-        // Anchored-only: no gap-filling needed.
-        guard !nonPinned.isEmpty else {
-            return anchors.map { Positioned(item: $0.0, angleDegrees: $0.1, isAnchored: true) }
-        }
-
-        // Compute gap sizes between consecutive anchors (with wrap-around).
-        // If there is only one anchor, the "gap" is the full 360° starting
-        // just after the anchor itself.
-        struct Gap {
-            let startAngle: Double   // degrees, exclusive of the anchor at this angle
-            let size: Double         // degrees
-            var count: Int = 0       // how many non-pinned items land here
-        }
-
-        var gaps: [Gap] = []
-        for (i, anchor) in anchors.enumerated() {
-            let next = anchors[(i + 1) % anchors.count]
-            let rawSize = next.1 - anchor.1
-            let size = rawSize > 0 ? rawSize : rawSize + 360
-            gaps.append(Gap(startAngle: anchor.1, size: size))
-        }
-
-        // Distribute non-pinned items proportional to each gap's share of
-        // the total gap arc. Total gap arc equals 360° because anchors are
-        // infinitely thin — their "size" is 0.
-        let totalSize = gaps.reduce(0) { $0 + $1.size }
-        let n = nonPinned.count
-
-        let floored: [Double] = gaps.map { Double(n) * $0.size / totalSize }
-        for i in 0..<gaps.count {
-            gaps[i].count = Int(floored[i].rounded(.down))
-        }
-
-        // Hand out leftover slots to the gaps with the largest fractional
-        // remainders. Guarantees the sum matches `n` exactly.
-        var leftover = n - gaps.reduce(0) { $0 + $1.count }
-        if leftover > 0 {
-            let order = (0..<gaps.count).sorted {
-                (floored[$0] - Double(gaps[$0].count)) > (floored[$1] - Double(gaps[$1].count))
-            }
-            for i in order {
-                if leftover == 0 { break }
-                gaps[i].count += 1
-                leftover -= 1
-            }
-        }
-
-        // Place anchors and non-pinned items, walking clockwise.
-        var result: [Positioned] = []
-        var nonPinnedCursor = 0
-
-        for (i, anchor) in anchors.enumerated() {
-            result.append(Positioned(item: anchor.0, angleDegrees: anchor.1, isAnchored: true))
-            let gap = gaps[i]
-            if gap.count > 0 {
-                // Evenly space items inside the gap, leaving equal margins
-                // on both sides so they don't visually collide with the
-                // anchors at the gap's endpoints.
-                let step = gap.size / Double(gap.count + 1)
-                for j in 1...gap.count {
-                    let angle = normalize(gap.startAngle + step * Double(j))
-                    result.append(
-                        Positioned(
-                            item: nonPinned[nonPinnedCursor],
-                            angleDegrees: angle,
-                            isAnchored: false
-                        )
-                    )
-                    nonPinnedCursor += 1
-                }
-            }
-        }
-
-        // Safety: in the unlikely case the proportional math left items over,
-        // stuff them at the end. Shouldn't happen with the remainder fixup
-        // above, but guarding against arithmetic surprises is cheap.
-        while nonPinnedCursor < nonPinned.count {
-            result.append(
-                Positioned(
-                    item: nonPinned[nonPinnedCursor],
-                    angleDegrees: normalize(Double(nonPinnedCursor) * 360 / Double(nonPinned.count)),
-                    isAnchored: false
+        // Rank by residual so the closest claim is honored first. Without this
+        // the result would depend on the order of `pinnedBundleIds`, which is
+        // the order the user happened to pin things in - not something they
+        // can see or reason about.
+        let claims: [Claim] = preferred
+            .map { entry in
+                let angle = normalize(entry.preferredAngle)
+                let ideal = Int((angle / step).rounded()) % n
+                return Claim(
+                    item: entry.item,
+                    idealSlot: ideal,
+                    residual: abs(smallestDifference(angle, Double(ideal) * step)),
+                    normalizedAngle: angle
                 )
+            }
+            .sorted {
+                $0.residual == $1.residual
+                    ? $0.normalizedAngle < $1.normalizedAngle
+                    : $0.residual < $1.residual
+            }
+
+        for claim in claims {
+            let slot = firstFreeSlot(from: claim.idealSlot, in: slots)
+            slots[slot] = Positioned(
+                item: claim.item,
+                angleDegrees: Double(slot) * step,
+                isAnchored: true
             )
-            nonPinnedCursor += 1
         }
 
-        return result
+        var remaining = others.makeIterator()
+        for i in 0..<n where slots[i] == nil {
+            guard let item = remaining.next() else { break }
+            slots[i] = Positioned(
+                item: item,
+                angleDegrees: Double(i) * step,
+                isAnchored: false
+            )
+        }
+
+        return slots.compactMap { $0 }
+    }
+
+    /// Walks outward from `ideal`, alternating clockwise and counter-clockwise,
+    /// for the first unoccupied slot. Always succeeds: preferred items are
+    /// themselves counted in `slots.count`, so demand never exceeds supply.
+    private static func firstFreeSlot(from ideal: Int, in slots: [Positioned?]) -> Int {
+        let n = slots.count
+        if slots[ideal] == nil { return ideal }
+        for offset in 1...n {
+            let clockwise = (ideal + offset) % n
+            if slots[clockwise] == nil { return clockwise }
+            let counter = ((ideal - offset) % n + n) % n
+            if slots[counter] == nil { return counter }
+        }
+        return ideal  // unreachable
+    }
+
+    /// Signed shortest angular distance from `b` to `a`, in (-180, 180].
+    private static func smallestDifference(_ a: Double, _ b: Double) -> Double {
+        var diff = a - b
+        while diff > 180 { diff -= 360 }
+        while diff < -180 { diff += 360 }
+        return diff
     }
 
     // MARK: - Default angle assignment
@@ -177,20 +159,5 @@ enum RingLayout {
         var d = degrees.truncatingRemainder(dividingBy: 360)
         if d < 0 { d += 360 }
         return d
-    }
-
-    /// Even distribution for the empty-anchors fallback. Matches the old
-    /// `angleForIndex` behavior so users who haven't configured any anchors
-    /// see exactly the same ring as before the feature.
-    private static func evenDistribution(_ items: [OrbitItem]) -> [Positioned] {
-        guard !items.isEmpty else { return [] }
-        let slice = 360.0 / Double(items.count)
-        return items.enumerated().map { index, item in
-            Positioned(
-                item: item,
-                angleDegrees: normalize(slice * Double(index)),
-                isAnchored: false
-            )
-        }
     }
 }

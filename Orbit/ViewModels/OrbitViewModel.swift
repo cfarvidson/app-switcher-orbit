@@ -66,23 +66,24 @@ final class OrbitViewModel: ObservableObject {
         let anchoredApps = allApps.filter { pinnedSet.contains($0.bundleIdentifier ?? "") }
         let nonPinnedApps = allApps.filter { !pinnedSet.contains($0.bundleIdentifier ?? "") }
 
-        // Build the anchored (item, angle) list from the user's stored angles.
-        var anchored: [(OrbitItem, Double)] = []
+        // Build the preferred (item, direction) list from the user's stored
+        // preferences. These are directions the solver aims for, not positions.
+        var preferred: [(item: OrbitItem, preferredAngle: Double)] = []
         if settings.dictationEnabled, let angle = settings.dictationPreferredAngle {
-            anchored.append((.dictation, angle))
+            preferred.append((.dictation, angle))
         }
         for app in anchoredApps {
             if let bundleId = app.bundleIdentifier, let angle = settings.pinnedPreferredAngles[bundleId] {
-                anchored.append((.app(app), angle))
+                preferred.append((.app(app), angle))
             }
         }
 
-        NSLog("[Orbit.layout] show() dictationPreferredAngle=\(String(describing: settings.dictationPreferredAngle)) pinAngles=\(settings.pinnedPreferredAngles)")
-        NSLog("[Orbit.layout] show() anchored=\(anchored.map { "\($0.0.id)@\(Int($0.1))°" })")
+        NSLog("[Orbit.layout] show() dictationPref=\(String(describing: settings.dictationPreferredAngle)) pinPrefs=\(settings.pinnedPreferredAngles)")
+        NSLog("[Orbit.layout] show() preferred=\(preferred.map { "\($0.item.id)@\(Int($0.preferredAngle))°" })")
 
         positionedItems = RingLayout.compute(
-            anchoredItems: anchored,
-            nonPinned: nonPinnedApps.map(OrbitItem.app)
+            preferred: preferred,
+            others: nonPinnedApps.map(OrbitItem.app)
         )
 
         NSLog("[Orbit.layout] show() positioned=\(positionedItems.map { "\($0.item.id)@\(Int($0.angleDegrees))°\($0.isAnchored ? "*" : "")" })")
