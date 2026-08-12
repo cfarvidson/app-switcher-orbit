@@ -8,9 +8,10 @@ struct DictationTileView: View {
     let size: CGFloat
     var isAnchored: Bool = true
 
-    /// The dictation tile is always anchored (that is how it gets into the
-    /// ring). The flag is threaded through for consistency with
-    /// `AppIconView` and so the layout preview can render mock tiles.
+    /// Mirrors `AppIconView`'s sizing: anchored tiles render 1.2x larger
+    /// than non-anchored ones. `isAnchored` defaults to true since the
+    /// dictation tile is always anchored in the ring, but the layout
+    /// preview passes it explicitly to render mock tiles at either size.
     private var effectiveSize: CGFloat {
         isAnchored ? size * 1.2 : size
     }

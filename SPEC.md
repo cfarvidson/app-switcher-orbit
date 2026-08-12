@@ -268,7 +268,7 @@ Public API:
 1. `AVAudioEngine` taps the input node and runs samples through an `AVAudioConverter` to 16 kHz mono Float32 (the format Parakeet expects).
 2. Each tap callback computes RMS amplitude over the converted samples for a cheap voice-activity detector. Above the threshold = speech, below = silence.
 3. After `SettingsService.dictationSilenceTriggerSeconds` of continuous silence following speech (and at least `minSpeechSeconds` of speech in the buffer), or after a hard `maxBufferSeconds` cap, the buffered audio is handed to `AsrManager.transcribe(_:decoderState:)`. Each flush allocates a **fresh** `TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)`: a flush is one complete utterance, so there is no decoder continuity to carry across calls. No language argument is passed - the model detects it.
-4. The resulting transcript is filtered (a transcript wrapped entirely in `[...]` or `(...)` is dropped, and both the ASCII `...` and the Unicode `…` ellipsis forms are stripped because the model emits them for mid-sentence pauses) and injected into the frontmost app via the **clipboard-paste path** described below. Consecutive utterances within a session are joined with a single space.
+4. The resulting transcript is filtered (a transcript wrapped entirely in `[...]` or `(...)` is dropped, and both the ASCII `...` and the Unicode `…` ellipsis forms are stripped because the model emits them for mid-sentence pauses, then any resulting double spaces are collapsed to single spaces and the result re-trimmed) and injected into the frontmost app via the **clipboard-paste path** described below. Consecutive utterances within a session are joined with a single space.
 5. ESC cancels the session (discards the buffer). Clicking the floating indicator, re-triggering Orbit, or hitting the 60 s hard cap commits the session - `stop(reason:flushBuffer:)` runs a final transcription on whatever's still in the buffer before tearing down, so the natural "speak then press hotkey to stop" flow doesn't lose the last utterance. The final flush is skipped when a VAD-triggered transcription is already in flight (`transcribing == true`): that in-flight task still injects its own result, and the few hundred ms captured after it was dispatched would only transcribe as a broken fragment.
 
 ### Text injection (clipboard paste)
@@ -597,17 +597,15 @@ A keyboard shortcut recorder:
 
 Key entries:
 
-| Key                             | Value                                                                                                                                        |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| LSUIElement                     | true (no Dock icon)                                                                                                                          |
-| NSAccessibilityUsageDescription | "Orbit needs accessibility access to monitor global keyboard shortcuts and switch between applications."                                     |
-| NSMicrophoneUsageDescription    | "Orbit captures microphone audio for on-device speech recognition when you select a language tile in the ring. Audio never leaves your Mac." |
-| NSMainNibFile                   | (empty string)                                                                                                                               |
-| NSPrincipalClass                | NSApplication                                                                                                                                |
+| Key                             | Value                                                                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| LSUIElement                     | true (no Dock icon)                                                                                                                             |
+| NSAccessibilityUsageDescription | "Orbit needs accessibility access to monitor global keyboard shortcuts and switch between applications."                                        |
+| NSMicrophoneUsageDescription    | "Orbit captures microphone audio for on-device speech recognition when you select the dictation tile in the ring. Audio never leaves your Mac." |
+| NSMainNibFile                   | (empty string)                                                                                                                                  |
+| NSPrincipalClass                | NSApplication                                                                                                                                   |
 
 `NSSpeechRecognitionUsageDescription` is intentionally absent - Orbit does not use `SFSpeechRecognizer`, only the microphone via `AVAudioEngine` plus Parakeet's local CoreML pipeline.
-
-The `NSMicrophoneUsageDescription` string above is quoted verbatim from the shipped `Info.plist`. Its wording still refers to "a language tile", which no longer exists; it describes the single dictation tile.
 
 ## Entitlements
 

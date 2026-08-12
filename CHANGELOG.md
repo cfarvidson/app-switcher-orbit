@@ -17,6 +17,7 @@
 
 - Old WhisperKit models are not deleted automatically. They live in `~/Documents/huggingface/models/argmaxinc/whisperkit-coreml/` and can run to several GB.
 - The Parakeet model downloads on first use from Settings → Dictation.
+- If you only had the translate tile enabled and dictation turned off, you now have no ring tile at all - the app does not tell you this. Enable dictation in Settings → Dictation to get a ring tile back.
 
 ## 1.1.0
 

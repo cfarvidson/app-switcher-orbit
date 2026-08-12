@@ -195,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // If dictation is currently recording, the trigger acts as a stop
         // button instead of opening the ring. Lets the user cancel a
         // recording session with the same hotkey/mouse trigger they used
-        // to start it via the language tile.
+        // to start it via the dictation tile.
         if SpeechRecognitionService.shared.isRunning {
             SpeechRecognitionService.shared.stop(reason: "orbit retrigger")
             return

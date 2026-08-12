@@ -65,7 +65,7 @@ final class RecordingIndicatorPanel: NSPanel {
     }
 
     /// Update the indicator state in place (e.g. flip from `loading` to
-    /// `listening` once the model is ready). Cheap — just mutates the
+    /// `listening` once the model is ready). Cheap - just mutates the
     /// observable model the SwiftUI view is watching.
     func updateState(_ state: State) {
         model?.state = state
@@ -108,7 +108,7 @@ private struct RecordingIndicatorView: View {
 
     private var hintText: String {
         switch model.state {
-        case .loading: return "First-time download \u{2014} please wait"
+        case .loading: return "Reading model into memory"
         case .starting: return "Almost ready\u{2026}"
         case .listening: return "Click or press ESC to stop"
         }

@@ -20,7 +20,7 @@ import os
 ///   1. `AVAudioEngine` taps the input node and accumulates samples in a
 ///      ring buffer (16 kHz mono float, the format Parakeet expects).
 ///   2. Voice activity detection flushes the buffer to
-///      `AsrManager.transcribe(_:decoderState:language:)` once the user
+///      `AsrManager.transcribe(_:decoderState:)` once the user
 ///      pauses (see the VAD section below).
 ///   3. When the resulting transcript extends what we've already injected,
 ///      we type the new portion via `CGEvent.keyboardSetUnicodeString`.
@@ -80,6 +80,14 @@ final class SpeechRecognitionService: ObservableObject {
     /// gain — quiet speech still passes, baseline room noise doesn't.
     private let speechRmsThreshold: Float = 0.012
     /// Minimum buffered speech duration before we bother transcribing.
+    /// This equals FluidAudio's `ASRConstants.minimumAudioDurationSeconds` -
+    /// `AsrManager.transcribe` throws `ASRError.invalidAudioData` for
+    /// anything shorter (see `AsrManager+Transcription.swift`). The two
+    /// pre-flight guards that gate a transcribe call (`flushAndTranscribe`
+    /// and `stop(reason:flushBuffer:)`) both compare with strict `>`, so
+    /// today's value is safe by exactly one sample. Lowering this to catch
+    /// shorter utterances would make every such flush throw into a catch
+    /// that only logs.
     private let minSpeechSeconds: Double = 0.3
     /// Hard cap on the audio buffer to prevent runaway memory if VAD never
     /// triggers (e.g. user holds an "uhhhhh"). 25s is plenty for any
@@ -319,7 +327,7 @@ final class SpeechRecognitionService: ObservableObject {
         DispatchQueue.main.async {
             let alert = NSAlert()
             alert.messageText = "Dictation needs setup"
-            alert.informativeText = "Open Orbit Settings → Dictation and download a speech model before using the language tiles."
+            alert.informativeText = "Open Orbit Settings → Dictation and download a speech model before using the dictation tile."
             alert.alertStyle = .warning
             alert.addButton(withTitle: "Open Settings\u{2026}")
             alert.addButton(withTitle: "Cancel")
@@ -330,7 +338,7 @@ final class SpeechRecognitionService: ObservableObject {
         }
     }
 
-    /// Shown when the user clicks a language tile but has previously denied
+    /// Shown when the user clicks the dictation tile but has previously denied
     /// microphone access. Without this the failure is silent — Orbit just
     /// dismisses and nothing happens, which is the symptom of "dictation
     /// doesn't work" most users hit after a rebuild invalidates TCC.

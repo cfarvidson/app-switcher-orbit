@@ -3,7 +3,7 @@ import Foundation
 /// Pure-data layout engine for the Orbit ring.
 ///
 /// Produces a clockwise-sorted list of `Positioned` items given the
-/// user-configured anchored items (pinned apps + dictation languages) with
+/// user-configured anchored items (pinned apps + the dictation tile) with
 /// their stored angles, plus the set of non-pinned running apps that need to
 /// fill the gaps between anchors.
 ///
