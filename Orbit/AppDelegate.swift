@@ -26,8 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.overlayPanel?.hideOverlay()
         }
 
-        // If dictation is enabled, pre-load the WhisperKit model in the
-        // background so the first language-tile click doesn't have to wait
+        // If dictation is enabled, pre-load the Parakeet model in the
+        // background so the first dictation tile click doesn't have to wait
         // several seconds for the CoreML model to load. (Skips silently if
         // not yet downloaded — user must download from Settings first.)
         if settings.dictationEnabled {

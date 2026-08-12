@@ -40,14 +40,10 @@ final class RecordingIndicatorPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 
     func show(
-        localeId: String,
         state: State,
         onStopTapped: @escaping () -> Void
     ) {
-        let model = RecordingIndicatorModel(
-            localeId: localeId,
-            state: state
-        )
+        let model = RecordingIndicatorModel(state: state)
         self.model = model
         let view = RecordingIndicatorView(model: model, onStop: onStopTapped)
         let host = NSHostingView(rootView: view)
@@ -83,11 +79,9 @@ final class RecordingIndicatorPanel: NSPanel {
 /// Observable view-model so the indicator can flip from `loading` to
 /// `listening` without rebuilding the SwiftUI view tree.
 final class RecordingIndicatorModel: ObservableObject {
-    let localeId: String
     @Published var state: RecordingIndicatorPanel.State
 
-    init(localeId: String, state: RecordingIndicatorPanel.State) {
-        self.localeId = localeId
+    init(state: RecordingIndicatorPanel.State) {
         self.state = state
     }
 }
@@ -96,25 +90,6 @@ private struct RecordingIndicatorView: View {
     @ObservedObject var model: RecordingIndicatorModel
     let onStop: () -> Void
     @State private var pulse: Bool = false
-
-    private var flagEmoji: String {
-        guard let region = model.localeId.split(separator: "_").last,
-              region.count == 2
-        else { return "🏳️" }
-        let base: UInt32 = 127397
-        var scalar = ""
-        for ch in region.uppercased().unicodeScalars {
-            if let combined = UnicodeScalar(base + ch.value) {
-                scalar.unicodeScalars.append(combined)
-            }
-        }
-        return scalar.isEmpty ? "🏳️" : scalar
-    }
-
-    private var localeBadge: String {
-        guard let first = model.localeId.split(separator: "_").first else { return "" }
-        return (first.split(separator: "-").first.map(String.init) ?? String(first)).uppercased()
-    }
 
     private var isLoading: Bool {
         switch model.state {
@@ -163,18 +138,11 @@ private struct RecordingIndicatorView: View {
             )
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(flagEmoji)
-                        .font(.system(size: 16))
-                    Text(localeBadge)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.primary)
-                    Text(statusText)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                Text(statusText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(hintText)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)

@@ -48,7 +48,6 @@ struct SettingsView: View {
     @ObservedObject var settings = SettingsService.shared
     @ObservedObject var speech = SpeechRecognitionService.shared
     @State private var allApps: [AppInfo] = []
-    @State private var enabledDictationLocales: [DictationLanguage] = []
     @State private var availableInputDevices: [AudioInputDeviceService.Device] = []
 
     var body: some View {
@@ -67,7 +66,6 @@ struct SettingsView: View {
         .frame(width: 520, height: 800)
         .onAppear {
             refreshApps()
-            refreshDictationLocales()
             refreshInputDevices()
         }
     }
@@ -293,40 +291,22 @@ struct SettingsView: View {
     private var dictationTab: some View {
         Form {
             Section {
-                Toggle("Show dictation languages in the ring", isOn: $settings.dictationEnabled)
-                    .onChange(of: settings.dictationEnabled) { settings.save() }
+                Toggle("Show the dictation tile in the ring", isOn: $settings.dictationEnabled)
+                    .onChange(of: settings.dictationEnabled) {
+                        settings.save()
+                        if settings.dictationEnabled {
+                            // Assign an angle now so the tile appears at a
+                            // sensible spot the next time the ring opens.
+                            settings.ensureAnchorAngles()
+                        }
+                    }
 
-                Text("When on, language tiles appear in the Orbit ring. Selecting one starts on-device dictation in that language using a local Whisper model. Recognition runs entirely inside Orbit — no audio leaves your Mac.")
+                Text("When on, a dictation tile appears in the Orbit ring. Selecting it starts on-device dictation. The spoken language is detected automatically. Recognition runs entirely inside Orbit - no audio leaves your Mac.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             if settings.dictationEnabled {
-                Section("Languages") {
-                    if enabledDictationLocales.isEmpty {
-                        Text("No dictation languages are enabled in System Settings.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        dictationLanguagePicker(
-                            title: "Language 1",
-                            selection: $settings.dictationLanguage1Id
-                        )
-                        dictationLanguagePicker(
-                            title: "Language 2",
-                            selection: $settings.dictationLanguage2Id
-                        )
-                    }
-
-                    Button("Add more languages in System Settings\u{2026}") {
-                        openDictationSystemSettings()
-                    }
-                    .buttonStyle(.borderless)
-
-                    Button("Refresh list") { refreshDictationLocales() }
-                        .buttonStyle(.borderless)
-                }
-
                 Section("Speech model") {
                     Picker("Model", selection: $settings.dictationModelName) {
                         ForEach(WhisperModelOption.all) { option in
@@ -357,15 +337,7 @@ struct SettingsView: View {
                     }
 
                     speechModelStatusRow
-                }
 
-                Section("Status") {
-                    HStack {
-                        Text("Current dictation language")
-                        Spacer()
-                        Text(DictationService.currentLanguage() ?? "\u{2014}")
-                            .foregroundStyle(.secondary)
-                    }
                     dictationShortcutStatusRow
                 }
             }
@@ -479,24 +451,10 @@ struct SettingsView: View {
         }
     }
 
-    private func dictationLanguagePicker(
-        title: String,
-        selection: Binding<String?>
-    ) -> some View {
-        Picker(title, selection: selection) {
-            Text("None").tag(String?.none)
-            ForEach(enabledDictationLocales) { language in
-                Text("\(language.flagEmoji)  \(language.displayName)")
-                    .tag(Optional(language.id))
-            }
-        }
-        .onChange(of: selection.wrappedValue) { settings.save() }
-    }
-
     @ViewBuilder
     private var dictationShortcutStatusRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Orbit runs OpenAI Whisper locally via WhisperKit (CoreML on Apple Silicon) — recognition is entirely on-device and bypasses the system Dictation HUD. macOS will prompt for microphone permission the first time you click a language tile. Click the floating indicator or press ESC to stop dictation.")
+            Text("Orbit runs OpenAI Whisper locally via WhisperKit (CoreML on Apple Silicon) — recognition is entirely on-device and bypasses the system Dictation HUD. macOS will prompt for microphone permission the first time you click the dictation tile. Click the floating indicator or press ESC to stop dictation.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -511,18 +469,8 @@ struct SettingsView: View {
         }
     }
 
-    private func refreshDictationLocales() {
-        enabledDictationLocales = DictationService.enabledLocales()
-    }
-
     private func refreshInputDevices() {
         availableInputDevices = AudioInputDeviceService.listInputDevices()
-    }
-
-    private func openDictationSystemSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.keyboard?Dictation") {
-            NSWorkspace.shared.open(url)
-        }
     }
 
     // MARK: - Helpers

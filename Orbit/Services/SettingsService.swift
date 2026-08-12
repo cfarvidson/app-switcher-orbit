@@ -26,12 +26,10 @@ final class SettingsService: ObservableObject {
     @Published var pinnedBundleIds: [String]
     @Published var excludedBundleIds: Set<String>
     @Published var dictationEnabled: Bool
-    @Published var dictationLanguage1Id: String?
-    @Published var dictationLanguage2Id: String?
     @Published var dictationModelName: String
     @Published var dictationSilenceTriggerSeconds: Double
     @Published var pinnedAngles: [String: Double]
-    @Published var languageAngles: [String: Double]
+    @Published var dictationAngle: Double?
     @Published var dictationInputDeviceUID: String?
 
     private let defaults = UserDefaults.standard
@@ -59,8 +57,6 @@ final class SettingsService: ObservableObject {
         dictationEnabled = defaults.object(forKey: "dictationEnabled") != nil
             ? defaults.bool(forKey: "dictationEnabled")
             : false
-        dictationLanguage1Id = defaults.string(forKey: "dictationLanguage1Id")
-        dictationLanguage2Id = defaults.string(forKey: "dictationLanguage2Id")
         dictationModelName = SettingsService.sanitizeModelName(
             defaults.string(forKey: "dictationModelName")
         )
@@ -68,7 +64,7 @@ final class SettingsService: ObservableObject {
             ? defaults.double(forKey: "dictationSilenceTriggerSeconds")
             : 0.8
         pinnedAngles = SettingsService.loadAngleDict(defaults: defaults, key: "pinnedAngles")
-        languageAngles = SettingsService.loadAngleDict(defaults: defaults, key: "languageAngles")
+        dictationAngle = defaults.object(forKey: "dictationAngle") as? Double
         dictationInputDeviceUID = defaults.string(forKey: "dictationInputDeviceUID")
     }
 
@@ -120,12 +116,14 @@ final class SettingsService: ObservableObject {
         defaults.set(pinnedBundleIds, forKey: "pinnedBundleIds")
         defaults.set(Array(excludedBundleIds), forKey: "excludedBundleIds")
         defaults.set(dictationEnabled, forKey: "dictationEnabled")
-        defaults.set(dictationLanguage1Id, forKey: "dictationLanguage1Id")
-        defaults.set(dictationLanguage2Id, forKey: "dictationLanguage2Id")
         defaults.set(dictationModelName, forKey: "dictationModelName")
         defaults.set(dictationSilenceTriggerSeconds, forKey: "dictationSilenceTriggerSeconds")
         defaults.set(pinnedAngles, forKey: "pinnedAngles")
-        defaults.set(languageAngles, forKey: "languageAngles")
+        if let angle = dictationAngle {
+            defaults.set(angle, forKey: "dictationAngle")
+        } else {
+            defaults.removeObject(forKey: "dictationAngle")
+        }
         if let uid = dictationInputDeviceUID {
             defaults.set(uid, forKey: "dictationInputDeviceUID")
         } else {
@@ -135,18 +133,23 @@ final class SettingsService: ObservableObject {
 
     // MARK: - Layout angles
 
-    /// All currently known anchored angles in one flat list (pinned + languages).
-    /// Used by the default-placement algorithm when adding a new anchor.
+    /// All currently known anchored angles in one flat list (pinned apps +
+    /// the dictation tile). Used by the default-placement algorithm when
+    /// adding a new anchor.
     var allAnchorAngles: [Double] {
-        Array(pinnedAngles.values) + Array(languageAngles.values)
+        var all = Array(pinnedAngles.values)
+        if let angle = dictationAngle {
+            all.append(angle)
+        }
+        return all
     }
 
-    /// Ensures every currently-pinned bundle id and every configured language
-    /// has a stored angle. Newly seen items are placed at the center of the
-    /// largest currently-empty arc (Hitman weapon-wheel style), then
-    /// auto-saved. Called on every ring show so the storage is always in
-    /// sync with the user's pin/language selections.
-    func ensureAnchorAngles(for languages: [DictationLanguage]) {
+    /// Ensures every currently-pinned bundle id, and the dictation tile when
+    /// enabled, has a stored angle. Newly seen items are placed at the center
+    /// of the largest currently-empty arc (Hitman weapon-wheel style), then
+    /// auto-saved. Called on every ring show so the storage is always in sync
+    /// with the user's pin/dictation selections.
+    func ensureAnchorAngles() {
         var changed = false
 
         for bundleId in pinnedBundleIds where pinnedAngles[bundleId] == nil {
@@ -155,22 +158,16 @@ final class SettingsService: ObservableObject {
             changed = true
         }
 
-        for language in languages where languageAngles[language.id] == nil {
-            let angle = RingLayout.nextAnchorAngle(existingAngles: allAnchorAngles)
-            languageAngles[language.id] = angle
+        if dictationEnabled, dictationAngle == nil {
+            dictationAngle = RingLayout.nextAnchorAngle(existingAngles: allAnchorAngles)
             changed = true
         }
 
-        // Prune angles for bundles/locales that are no longer anchored so
-        // the dictionaries don't grow unbounded over time.
+        // Prune angles for bundles that are no longer pinned so the
+        // dictionary doesn't grow unbounded over time.
         let pinnedSet = Set(pinnedBundleIds)
         for key in pinnedAngles.keys where !pinnedSet.contains(key) {
             pinnedAngles.removeValue(forKey: key)
-            changed = true
-        }
-        let languageSet = Set(languages.map { $0.id })
-        for key in languageAngles.keys where !languageSet.contains(key) {
-            languageAngles.removeValue(forKey: key)
             changed = true
         }
 
@@ -178,20 +175,11 @@ final class SettingsService: ObservableObject {
     }
 
     /// Wipes all stored angles; next `ensureAnchorAngles` call reassigns
-    /// defaults for the current pinned+language set.
+    /// defaults for the current pinned set and the dictation tile.
     func resetLayoutAngles() {
         pinnedAngles = [:]
-        languageAngles = [:]
+        dictationAngle = nil
         save()
-    }
-
-    /// Resolved dictation language tiles for the ring. Empty when disabled or
-    /// no languages are configured.
-    var dictationLanguages: [DictationLanguage] {
-        guard dictationEnabled else { return [] }
-        return [dictationLanguage1Id, dictationLanguage2Id]
-            .compactMap { $0 }
-            .map(DictationLanguage.from(localeId:))
     }
 
     var shortcutDisplayString: String {

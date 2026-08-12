@@ -39,7 +39,7 @@ struct OrbitView: View {
                     )
                 }
 
-                // Items (apps + dictation languages) arranged in circle
+                // Items (apps + the dictation tile) arranged in circle
                 ForEach(Array(viewModel.positionedItems.enumerated()), id: \.element.item.id) { index, positioned in
                     let position = viewModel.positionForIndex(index)
                     let isSelected = viewModel.selectedIndex == index
@@ -53,9 +53,8 @@ struct OrbitView: View {
                                 size: viewModel.iconSize,
                                 isAnchored: positioned.isAnchored
                             )
-                        case .language(let language):
-                            LanguageTileView(
-                                language: language,
+                        case .dictation:
+                            DictationTileView(
                                 isSelected: isSelected,
                                 size: viewModel.iconSize,
                                 isAnchored: positioned.isAnchored

@@ -57,10 +57,9 @@ final class OrbitViewModel: ObservableObject {
         let settings = SettingsService.shared
         let excluded = settings.excludedBundleIds
         let pinned = settings.pinnedBundleIds
-        let languages = settings.dictationLanguages
 
         // Prune/assign angles for current anchored items before layout.
-        settings.ensureAnchorAngles(for: languages)
+        settings.ensureAnchorAngles()
 
         let allApps = AppService.runningApps(excluding: excluded, pinnedFirst: pinned)
         let pinnedSet = Set(pinned)
@@ -69,10 +68,8 @@ final class OrbitViewModel: ObservableObject {
 
         // Build the anchored (item, angle) list from the user's stored angles.
         var anchored: [(OrbitItem, Double)] = []
-        for language in languages {
-            if let angle = settings.languageAngles[language.id] {
-                anchored.append((.language(language), angle))
-            }
+        if settings.dictationEnabled, let angle = settings.dictationAngle {
+            anchored.append((.dictation, angle))
         }
         for app in anchoredApps {
             if let bundleId = app.bundleIdentifier, let angle = settings.pinnedAngles[bundleId] {
@@ -80,7 +77,7 @@ final class OrbitViewModel: ObservableObject {
             }
         }
 
-        NSLog("[Orbit.layout] show() stored langAngles=\(settings.languageAngles) pinAngles=\(settings.pinnedAngles)")
+        NSLog("[Orbit.layout] show() dictationAngle=\(String(describing: settings.dictationAngle)) pinAngles=\(settings.pinnedAngles)")
         NSLog("[Orbit.layout] show() anchored=\(anchored.map { "\($0.0.id)@\(Int($0.1))°" })")
 
         positionedItems = RingLayout.compute(
@@ -122,8 +119,10 @@ final class OrbitViewModel: ObservableObject {
             switch item {
             case .app(let app):
                 app.app.activate()
-            case .language(let language):
-                DictationService.switchLanguageAndStart(language.id)
+            case .dictation:
+                SpeechRecognitionService.shared.startDictation { errorMessage in
+                    NSLog("[Orbit.dictation] speech start failed: \(errorMessage)")
+                }
             }
         }
     }

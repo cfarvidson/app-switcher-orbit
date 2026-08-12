@@ -145,13 +145,10 @@ final class SpeechRecognitionService: ObservableObject {
         }
     }
 
-    /// Start a regular (non-translating) dictation session in `localeId`.
-    /// Parakeet transcribes audio (auto-detecting language) and pastes the
-    /// transcript into the frontmost app.
-    /// TEMPORARY signature (Task 1): `localeId` is ignored by the engine but
-    /// still used for the recording indicator's flag/label. Removed in Task 3.
-    func startDictation(localeId: String, onError: @escaping (String) -> Void = { _ in }) {
-        startInternal(localeId: localeId, onError: onError)
+    /// Start a dictation session. Parakeet detects the spoken language on
+    /// its own, so there is nothing to configure per session.
+    func startDictation(onError: @escaping (String) -> Void = { _ in }) {
+        startInternal(onError: onError)
     }
 
     /// Starts the audio engine in warmup mode without showing an indicator
@@ -249,10 +246,7 @@ final class SpeechRecognitionService: ObservableObject {
         NSLog("[Orbit.speech] warmup cancelled")
     }
 
-    private func startInternal(
-        localeId: String,
-        onError: @escaping (String) -> Void
-    ) {
+    private func startInternal(onError: @escaping (String) -> Void) {
         let now = CACurrentMediaTime()
         if starting || (now - lastStartTime) < startLockout {
             NSLog("[Orbit.speech] start() suppressed (starting=\(starting), since-last=\(Int((now - lastStartTime) * 1000))ms)")
@@ -279,7 +273,7 @@ final class SpeechRecognitionService: ObservableObject {
         }
 
         // Replace any existing indicator so we anchor near the user's
-        // current cursor and use the right locale.
+        // current cursor.
         if indicatorPanel != nil {
             indicatorPanel?.hideIndicator()
             indicatorPanel = nil
@@ -289,7 +283,7 @@ final class SpeechRecognitionService: ObservableObject {
         // model is downloaded but might still be loading into RAM.
         let initialState: RecordingIndicatorPanel.State =
             (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .listening
-        showIndicator(localeId: localeId, state: initialState)
+        showIndicator(state: initialState)
 
         ensurePermissions { [weak self] granted in
             guard let self else { return }
@@ -308,10 +302,10 @@ final class SpeechRecognitionService: ObservableObject {
                 await self.ensureModelsLoaded(onError: onError)
                 if self.asrManager != nil {
                     if self.warmupActive {
-                        self.promoteWarmupToSession(localeId: localeId)
+                        self.promoteWarmupToSession()
                     } else {
                         self.indicatorPanel?.updateState(.starting)
-                        self.beginCapture(localeId: localeId, onError: onError)
+                        self.beginCapture(onError: onError)
                     }
                 }
                 self.starting = false
@@ -540,7 +534,7 @@ final class SpeechRecognitionService: ObservableObject {
     /// preroll into the session buffer, flip the mode flag, and update the
     /// indicator. The next audio tap callback will write to `audioBuffer`
     /// instead of `prerollBuffer`.
-    private func promoteWarmupToSession(localeId: String) {
+    private func promoteWarmupToSession() {
         audioBufferQueue.sync {
             audioBuffer.removeAll(keepingCapacity: true)
             audioBuffer.append(contentsOf: prerollBuffer)
@@ -557,10 +551,10 @@ final class SpeechRecognitionService: ObservableObject {
         // The engine has been delivering buffers since warmup; flip indicator
         // straight to .listening (skip the .starting state, no startup gap).
         indicatorPanel?.updateState(.listening)
-        NSLog("[Orbit.speech] promoted warmup to session for locale \(localeId), preroll=\(audioBuffer.count) samples")
+        NSLog("[Orbit.speech] promoted warmup to session, preroll=\(audioBuffer.count) samples")
     }
 
-    private func beginCapture(localeId: String, onError: @escaping (String) -> Void) {
+    private func beginCapture(onError: @escaping (String) -> Void) {
         // Configure input device BEFORE reading inputNode.outputFormat — the
         // format depends on whichever device the input unit is bound to, and
         // the tap install below uses that format. The user's stored UID is
@@ -631,7 +625,7 @@ final class SpeechRecognitionService: ObservableObject {
         installEscMonitor()
         scheduleHardCap()
         isRunning = true
-        NSLog("[Orbit.speech] capture started for locale \(localeId)")
+        NSLog("[Orbit.speech] capture started")
     }
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, targetFormat: AVAudioFormat) {
@@ -919,9 +913,9 @@ final class SpeechRecognitionService: ObservableObject {
 
     // MARK: - Indicator
 
-    private func showIndicator(localeId: String, state: RecordingIndicatorPanel.State) {
+    private func showIndicator(state: RecordingIndicatorPanel.State) {
         let panel = RecordingIndicatorPanel()
-        panel.show(localeId: localeId, state: state) { [weak self] in
+        panel.show(state: state) { [weak self] in
             DispatchQueue.main.async { self?.stop(reason: "indicator click") }
         }
         indicatorPanel = panel
