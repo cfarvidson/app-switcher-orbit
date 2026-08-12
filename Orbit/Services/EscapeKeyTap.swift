@@ -93,6 +93,16 @@ final class EscapeKeyTap {
             return Unmanaged.passUnretained(event)
         }
 
+        // A modified Escape - Cmd-Opt-Esc above all, which opens Force Quit -
+        // must reach the frontmost app untouched. Force Quit is the user's
+        // escape hatch for exactly the case where an app has hung, and this
+        // tap is system-wide, so swallowing it here would be the wrong
+        // default. Only plain, unmodified Escape cancels dictation.
+        let modifierMask: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
+        if !event.flags.intersection(modifierMask).isEmpty {
+            return Unmanaged.passUnretained(event)
+        }
+
         // Act on the press only; the release is swallowed silently. Hop to
         // main asynchronously so the event callback returns immediately -
         // a slow callback is exactly what makes macOS disable the tap.

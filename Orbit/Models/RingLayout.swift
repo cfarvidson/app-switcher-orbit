@@ -103,7 +103,7 @@ enum RingLayout {
         return ideal  // unreachable
     }
 
-    /// Signed shortest angular distance from `b` to `a`, in (-180, 180].
+    /// Signed shortest angular distance from `b` to `a`, in [-180, 180].
     private static func smallestDifference(_ a: Double, _ b: Double) -> Double {
         var diff = a - b
         while diff > 180 { diff -= 360 }
@@ -119,9 +119,12 @@ enum RingLayout {
     /// gap between consecutive anchors and returns its midpoint.
     ///
     /// Duplicate angles in `existingAngles` are tolerated. They occur in
-    /// practice: two pinned apps can end up sharing an angle, and `compute`
-    /// has no duplicate handling, so it renders them stacked on the same
-    /// point. A new anchor must not be placed on top of them as well.
+    /// practice: two pinned apps can end up sharing a preferred angle, and
+    /// `compute` resolves that by bumping the later claim to the nearest
+    /// free slot rather than stacking them. Even so, dropping a new anchor
+    /// on top of an existing preference still produces a worse layout than
+    /// placing it in genuinely empty space, so duplicates are still avoided
+    /// here.
     static func nextAnchorAngle(existingAngles: [Double]) -> Double {
         if existingAngles.isEmpty { return 0 }
 
