@@ -6,9 +6,9 @@ options:
   createIntermediateGroups: true
   generateEmptyDirectories: true
 packages:
-  WhisperKit:
-    url: https://github.com/argmaxinc/WhisperKit
-    from: 0.9.0
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio
+    exactVersion: 0.15.5
 targets:
   Orbit:
     type: application
@@ -18,8 +18,8 @@ targets:
         excludes:
           - "**/*.entitlements"
     dependencies:
-      - package: WhisperKit
-        product: WhisperKit
+      - package: FluidAudio
+        product: FluidAudio
     settings:
       base:
         CODE_SIGN_ENTITLEMENTS: Orbit/Resources/Orbit.entitlements
