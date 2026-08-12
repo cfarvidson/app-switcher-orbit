@@ -10,7 +10,8 @@ Two independent complaints about Orbit's current behavior:
 1. **The dictation hover panel is in the way.** `RecordingIndicatorPanel` shows a
    220x64 floating panel near the cursor for the whole dictation session. It sits
    exactly where the user is looking and working. The feedback belongs somewhere
-   ambient. Escape must keep cancelling a session.
+   ambient. Escape must keep cancelling a session - and must stop leaking
+   through to the app being typed into, which it does today.
 
 2. **Ring positions are too static.** Pinned apps are stored at exact angles
    (snapped to 15 degrees) and non-pinned running apps are distributed
@@ -19,8 +20,8 @@ Two independent complaints about Orbit's current behavior:
    remaining arc. The user wants to place pinned apps _approximately_ and have
    Orbit handle the exact placement.
 
-Part 1 touches only `SpeechRecognitionService`, `AppDelegate` and the deleted
-panel. Parts 2 and 3 touch only `RingLayout`, `SettingsService`,
+Part 1 touches only `SpeechRecognitionService`, `AppDelegate`, the deleted panel
+and the new status item and Escape tap types. Parts 2 and 3 touch only `RingLayout`, `SettingsService`,
 `OrbitViewModel` and `LayoutPreviewView`. They share no code and can be built,
 verified and shipped in either order. Parts 2 and 3 are coupled to each other and
 must land together, since the preview depends on the new `compute` signature.
@@ -96,9 +97,9 @@ transition, so the icon is static except while loading or listening.
 
 The panel's click-to-stop affordance is replaced by:
 
-- **Escape** - already an unconditional global `NSEvent` monitor in
+- **Escape** - already an unconditional global monitor in
   `SpeechRecognitionService.installEscMonitor()` (line 899), independent of the
-  panel. Unchanged.
+  panel. Reimplemented as an event tap so the key is consumed; see below.
 - **Re-triggering Orbit** - already handled in `AppDelegate.toggleOrbit`.
   Unchanged.
 - **A "Stop Dictation" menu item**, inserted at the top of the status item menu
@@ -111,6 +112,39 @@ status line carrying the state text: the `.loading` message verbatim, or
 "Starting…", "Listening…", "Transcribing…". This is the only place the loading
 message is still shown, and it matches how the existing disabled activation and
 input-mode items already read.
+
+### Escape must be consumed, not merely observed
+
+`NSEvent.addGlobalMonitorForEvents` can observe another app's key presses but
+never swallow them. Escape therefore cancels the dictation session **and** still
+arrives at whatever app the user is typing into, where it closes a dialog,
+dismisses a find bar, or drops them out of an editor mode. Cancelling dictation
+must not do that.
+
+A new `Orbit/Services/EscapeKeyTap.swift` wraps a `CGEvent` tap
+(`.cgSessionEventTap`, `.headInsertEventTap`, `.defaultTap`) covering keyDown
+and keyUp. The callback returns `nil` for keycode 53, which consumes the event;
+every other key is passed through untouched. Both down and up are swallowed so
+apps that act on key release do not see an Escape release with no press. The tap
+lives only for the duration of a session: installed by `installEscMonitor()`,
+torn down in `stop(reason:flushBuffer:)` alongside the existing teardown.
+
+macOS disables a tap whose callback is slow, and again whenever user input state
+is reset, delivering `tapDisabledByTimeout` / `tapDisabledByUserInput`. The
+handler re-enables itself on both rather than silently going deaf mid-session,
+and hops to the main queue asynchronously before running the cancel so the
+callback returns immediately.
+
+Taps require Accessibility permission, which Orbit already requires for its
+Carbon hotkey and for `CGEvent`-based text injection, and already prompts for in
+`AppDelegate.promptAccessibilityIfNeeded`. If the tap cannot be created,
+`start()` returns false and the caller falls back to today's observe-only
+`NSEvent` monitor: Escape still cancels, it just also reaches the target app.
+Escape must never stop working, so the fallback is not optional.
+
+Escape keeps its current semantics: it cancels and discards the audio buffer,
+matching macOS Dictation. Only the hotkey re-trigger and the menu bar command
+commit.
 
 ### Accepted trade-off
 

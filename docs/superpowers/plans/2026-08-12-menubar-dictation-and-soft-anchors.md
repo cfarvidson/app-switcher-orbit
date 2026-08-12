@@ -14,7 +14,7 @@
 - The project has **no test target** and this plan does not add one. Every task is verified by `./build.sh` plus the specific manual checks written into that task.
 - Build with `./build.sh` from the repo root. It builds Release and copies `Orbit.app` to the repo root.
 - Run `npx prettier --write .` before every commit (project `CLAUDE.md`).
-- `SPEC.md` must reflect the final state of the app before the last commit (project `CLAUDE.md`). Task 7 does this.
+- `SPEC.md` must reflect the final state of the app before the last commit (project `CLAUDE.md`). Task 8 does this.
 - UserDefaults keys `pinnedAngles` and `dictationAngle` must NOT be renamed. Only the Swift property names change, so existing user settings survive the upgrade with no migration.
 - Angles are degrees, 0 at twelve o'clock, increasing clockwise. This convention is load-bearing across `RingLayout`, `OrbitViewModel` and `LayoutPreviewView`.
 - Never use em dashes in code comments or user-facing copy; use a plain hyphen.
@@ -22,7 +22,7 @@
 
 ## Task Order and Independence
 
-Tasks 1-3 (dictation) and tasks 4-6 (ring) touch disjoint files and can be done in either order. Within each group the order is required. Task 7 documents both and must run last.
+Tasks 1-4 (dictation) and tasks 5-7 (ring) touch disjoint files and can be done in either order. Within each group the order is required. Task 8 documents both and must run last.
 
 ---
 
@@ -692,9 +692,242 @@ git commit -m "feat: remove the floating dictation panel, add menu bar stop comm
 
 ---
 
-### Task 4: Rename angle properties to preferred angles
+### Task 4: Swallow Escape during a dictation session
 
-Pure mechanical rename. No behavior change, no UserDefaults key change. Doing it on its own keeps the algorithm diff in Task 5 readable.
+Today `installEscMonitor` uses `NSEvent.addGlobalMonitorForEvents`, which can only _observe_ another app's key presses. Escape therefore cancels dictation **and** still reaches whatever app the user is typing into, where it closes their dialog, exits their editor mode, or dismisses their sheet. Consuming the key requires a `CGEvent` tap, which needs Accessibility permission - something Orbit already requires and already prompts for in `AppDelegate.promptAccessibilityIfNeeded`.
+
+**Files:**
+
+- Create: `Orbit/Services/EscapeKeyTap.swift`
+- Modify: `Orbit/Services/SpeechRecognitionService.swift`
+
+**Interfaces:**
+
+- Consumes: nothing from earlier tasks.
+- Produces: `EscapeKeyTap` with `init(onEscape: @escaping () -> Void)`, `func start() -> Bool` (false when the tap could not be created) and `func stop()`. Nothing later consumes it.
+
+- [ ] **Step 1: Create the tap**
+
+Create `Orbit/Services/EscapeKeyTap.swift`:
+
+```swift
+import AppKit
+import ApplicationServices
+
+/// Swallows the Escape key system-wide while active and reports each press
+/// to `onEscape`. Used during dictation so that cancelling a session does
+/// not also deliver an Escape to whatever app the user is typing into.
+///
+/// A `CGEvent` tap is the only way to *consume* a key press from another
+/// app's event stream. `NSEvent.addGlobalMonitorForEvents` can observe but
+/// never swallow, which is why this type exists. Taps require Accessibility
+/// permission - already required by Orbit for its hotkey and text injection.
+///
+/// `start()` returns false when the tap cannot be created, so the caller can
+/// fall back to an observe-only monitor. In that state Escape still cancels
+/// dictation, it just also reaches the frontmost app.
+final class EscapeKeyTap {
+    private var tap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    private let onEscape: () -> Void
+
+    private static let escapeKeyCode: Int64 = 53
+
+    init(onEscape: @escaping () -> Void) {
+        self.onEscape = onEscape
+    }
+
+    deinit {
+        stop()
+    }
+
+    @discardableResult
+    func start() -> Bool {
+        guard tap == nil else { return true }
+
+        // Both keyDown and keyUp: swallowing only the down would leave apps
+        // that act on key-up seeing an Escape release with no press.
+        let mask = (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.keyUp.rawValue)
+
+        // The callback is a C function pointer and cannot capture, so `self`
+        // travels through `userInfo` as an opaque pointer.
+        let callback: CGEventTapCallBack = { _, type, event, userInfo in
+            guard let userInfo else { return Unmanaged.passUnretained(event) }
+            let tap = Unmanaged<EscapeKeyTap>.fromOpaque(userInfo).takeUnretainedValue()
+            return tap.handle(type: type, event: event)
+        }
+
+        guard let port = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: CGEventMask(mask),
+            callback: callback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            NSLog("[Orbit.speech] escape tap could not be created (Accessibility?), falling back to observe-only")
+            return false
+        }
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: port, enable: true)
+
+        tap = port
+        runLoopSource = source
+        NSLog("[Orbit.speech] escape tap installed")
+        return true
+    }
+
+    func stop() {
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+        tap = nil
+        runLoopSource = nil
+    }
+
+    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        // macOS disables a tap that takes too long to respond, or when the
+        // user input state is reset. Re-enable instead of silently going
+        // deaf for the rest of the session.
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            NSLog("[Orbit.speech] escape tap was disabled by the system, re-enabling")
+            if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            return Unmanaged.passUnretained(event)
+        }
+
+        guard event.getIntegerValueField(.keyboardEventKeycode) == Self.escapeKeyCode else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Act on the press only; the release is swallowed silently. Hop to
+        // main asynchronously so the event callback returns immediately -
+        // a slow callback is exactly what makes macOS disable the tap.
+        if type == .keyDown {
+            DispatchQueue.main.async { [weak self] in self?.onEscape() }
+        }
+        return nil  // swallowed, never reaches the frontmost app
+    }
+}
+```
+
+- [ ] **Step 2: Use it in `SpeechRecognitionService`**
+
+Replace the stored property at line 103:
+
+```swift
+private var escMonitor: Any?
+```
+
+with:
+
+```swift
+private var escTap: EscapeKeyTap?
+/// Observe-only fallback, used only when the `CGEvent` tap cannot be
+/// created. Escape still cancels, but also reaches the frontmost app.
+private var escMonitor: Any?
+```
+
+Replace the whole `installEscMonitor()` method:
+
+```swift
+private func installEscMonitor() {
+    // ESC = cancel (matches macOS Dictation). Discards the audio buffer
+    // instead of transcribing it.
+    //
+    // The tap swallows the key so it never reaches the app the user is
+    // typing into. Without that, cancelling dictation inside a dialog or a
+    // modal editor would also dismiss it.
+    //
+    // "Stop on any keypress" was tried and reverted: it killed legitimate
+    // sessions whenever an incidental keystroke arrived between audio
+    // capture and the model finishing transcription (~600ms). Users who
+    // want to switch from dictation to typing should press ESC, use
+    // "Stop Dictation" in the menu bar, or re-trigger Orbit.
+    let tap = EscapeKeyTap { [weak self] in
+        self?.stop(reason: "esc", flushBuffer: false)
+    }
+    if tap.start() {
+        escTap = tap
+        return
+    }
+
+    escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        guard let self else { return }
+        if event.keyCode != 53 { return }  // kVK_Escape
+        DispatchQueue.main.async { self.stop(reason: "esc", flushBuffer: false) }
+    }
+}
+```
+
+In `stop(reason:flushBuffer:)`, replace the teardown block at lines 395-398:
+
+```swift
+escTap?.stop()
+escTap = nil
+if let monitor = escMonitor {
+    NSEvent.removeMonitor(monitor)
+    escMonitor = nil
+}
+```
+
+- [ ] **Step 3: Update the header doc comment**
+
+Task 3 rewrote the numbered list at line 27-28. Amend the Escape clause to note the swallow:
+
+```swift
+///   4. ESC cancels the session (discarding the buffer) and is swallowed so
+///      it never reaches the app being typed into. Re-triggering Orbit stops
+///      it and commits. "Stop Dictation" in the menu bar stops it and
+///      commits. Session state is published as `dictationState` and rendered
+///      by `StatusItemController` in the menu bar.
+```
+
+- [ ] **Step 4: Build**
+
+Run: `./build.sh`
+Expected: `Copied to ./Orbit.app`, no errors.
+
+- [ ] **Step 5: Verify Escape is swallowed**
+
+Launch the freshly built app. macOS may re-prompt for Accessibility because the binary changed; if the alert about a stale entry appears, toggle Orbit off and on in System Settings → Privacy & Security → Accessibility and relaunch.
+
+Stream the logs to confirm the tap installed:
+
+Run: `log stream --predicate 'process == "Orbit"' --style compact | grep Orbit.speech`
+Expected on session start: `escape tap installed`. If you see `escape tap could not be created`, Accessibility is not actually granted - fix that before continuing, otherwise you are testing the fallback path.
+
+Now the behavior itself. Open TextEdit, then Format → Font to open the Fonts panel, click into the document, and start dictation. Press Escape.
+Expected: dictation cancels and the Fonts panel stays open. Before this task the panel would close.
+
+Second check, in Safari: open any page, press Command-F to show the find bar, click into the page, start dictation, press Escape.
+Expected: dictation cancels and the find bar stays open.
+
+Third check, that nothing else is swallowed: start dictation, type a few ordinary characters and press Tab and Return.
+Expected: every one of them lands in the target app as usual. Only Escape is intercepted.
+
+Fourth check, that the tap is torn down: stop a session with the hotkey, then press Escape in TextEdit's Fonts panel.
+Expected: the panel closes. Escape must behave completely normally when no session is running.
+
+- [ ] **Step 6: Commit**
+
+```bash
+npx prettier --write .
+git add Orbit/Services/EscapeKeyTap.swift Orbit/Services/SpeechRecognitionService.swift
+git commit -m "feat: swallow ESC during dictation so it doesn't reach the target app"
+```
+
+---
+
+### Task 5: Rename angle properties to preferred angles
+
+Pure mechanical rename. No behavior change, no UserDefaults key change. Doing it on its own keeps the algorithm diff in Task 6 readable.
 
 **Files:**
 
@@ -706,7 +939,7 @@ Pure mechanical rename. No behavior change, no UserDefaults key change. Doing it
 **Interfaces:**
 
 - Consumes: nothing.
-- Produces: `SettingsService.pinnedPreferredAngles: [String: Double]`, `SettingsService.dictationPreferredAngle: Double?`, `SettingsService.allPreferredAngles: [Double]`, `SettingsService.ensurePreferredAngles()`. Tasks 5 and 6 use these names.
+- Produces: `SettingsService.pinnedPreferredAngles: [String: Double]`, `SettingsService.dictationPreferredAngle: Double?`, `SettingsService.allPreferredAngles: [Double]`, `SettingsService.ensurePreferredAngles()`. Tasks 6 and 7 use these names.
 
 - [ ] **Step 1: Rename in `SettingsService`**
 
@@ -758,7 +991,7 @@ git commit -m "refactor: rename ring angles to preferred angles"
 
 ---
 
-### Task 5: Rewrite `RingLayout.compute` as slot assignment
+### Task 6: Rewrite `RingLayout.compute` as slot assignment
 
 **Files:**
 
@@ -767,8 +1000,8 @@ git commit -m "refactor: rename ring angles to preferred angles"
 
 **Interfaces:**
 
-- Consumes: `SettingsService.pinnedPreferredAngles` and `dictationPreferredAngle` from Task 4.
-- Produces: `RingLayout.compute(preferred: [(item: OrbitItem, preferredAngle: Double)], others: [OrbitItem]) -> [Positioned]`. Task 6 calls this exact signature. `Positioned` keeps its existing shape: `let item: OrbitItem`, `let angleDegrees: Double`, `let isAnchored: Bool`.
+- Consumes: `SettingsService.pinnedPreferredAngles` and `dictationPreferredAngle` from Task 5.
+- Produces: `RingLayout.compute(preferred: [(item: OrbitItem, preferredAngle: Double)], others: [OrbitItem]) -> [Positioned]`. Task 7 calls this exact signature. `Positioned` keeps its existing shape: `let item: OrbitItem`, `let angleDegrees: Double`, `let isAnchored: Bool`.
 
 - [ ] **Step 1: Replace the body of `RingLayout.swift`**
 
@@ -948,7 +1181,7 @@ git commit -m "feat: resolve ring anchors onto evenly spaced slots"
 
 ---
 
-### Task 6: Rebuild `LayoutPreviewView` as a live simulation
+### Task 7: Rebuild `LayoutPreviewView` as a live simulation
 
 **Files:**
 
@@ -956,7 +1189,7 @@ git commit -m "feat: resolve ring anchors onto evenly spaced slots"
 
 **Interfaces:**
 
-- Consumes: `RingLayout.compute(preferred:others:)` from Task 5, the renamed `SettingsService` properties from Task 4, `AppService.runningApps(excluding:pinnedFirst:)`.
+- Consumes: `RingLayout.compute(preferred:others:)` from Task 6, the renamed `SettingsService` properties from Task 5, `AppService.runningApps(excluding:pinnedFirst:)`.
 - Produces: nothing consumed by later tasks.
 
 - [ ] **Step 1: Replace the file**
@@ -1259,7 +1492,7 @@ git commit -m "feat: preview the resolved ring live in Settings"
 
 ---
 
-### Task 7: Update SPEC.md, CHANGELOG.md and the version
+### Task 8: Update SPEC.md, CHANGELOG.md and the version
 
 **Files:**
 
@@ -1269,12 +1502,17 @@ git commit -m "feat: preview the resolved ring live in Settings"
 
 **Interfaces:**
 
-- Consumes: everything from Tasks 1-6.
+- Consumes: everything from Tasks 1-7.
 - Produces: nothing.
 
 - [ ] **Step 1: Update the file tree and AppDelegate sections of SPEC.md**
 
-Line 44-45: remove the `RecordingIndicatorPanel.swift` entry, update the `LayoutPreviewView.swift` description to "Live preview of the resolved ring; drag pinned apps to set a preferred direction", and add `StatusItemController.swift # Menu bar status item: icon states, menu, dictation stop command` under the Services group.
+Line 44-45: remove the `RecordingIndicatorPanel.swift` entry and update the `LayoutPreviewView.swift` description to "Live preview of the resolved ring; drag pinned apps to set a preferred direction". Under the Services group add two entries:
+
+```
+│   ├── StatusItemController.swift # Menu bar status item: icon states, menu, dictation stop command
+│   ├── EscapeKeyTap.swift    # CGEvent tap that swallows ESC during a dictation session
+```
 
 Line 63: the menu bar status item no longer uses a single fixed symbol. Replace it with this table:
 
@@ -1304,7 +1542,13 @@ Lines 231-235 (`### Layout angles`): rename to `### Layout preferences`, and ren
 
 Delete it and write a `### Menu bar feedback` section in its place covering: the `DictationState` enum and its five cases, that `.transcribing` covers only the post-stop final flush and never a mid-session VAD flush, the icon treatment per state, that the accent is `NSColor.controlAccentColor` applied as `contentTintColor`, that the breathe is a 30 fps `Timer` on `.common` run loop mode oscillating alpha between the base and 55% of it, and that the menu grows a disabled status line plus a "Stop Dictation" item while a session is live.
 
-- [ ] **Step 5: Update the remaining stale references**
+- [ ] **Step 5: Document the Escape tap**
+
+Add a `### Escape handling` subsection under `## SpeechRecognitionService`, after the `### Permissions` section (line 315). Cover: that a `CGEvent` tap is installed for the duration of a session and swallows both keyDown and keyUp for keycode 53 so Escape never reaches the frontmost app, that Escape cancels rather than commits (the buffer is discarded, matching macOS Dictation), that the tap re-enables itself on `tapDisabledByTimeout` and `tapDisabledByUserInput`, that it requires Accessibility permission, and that `start()` returning false falls back to an observe-only `NSEvent` global monitor where Escape still cancels but also reaches the target app.
+
+The `### Permissions` section itself must now list Accessibility as required for Escape interception, alongside the existing hotkey and text-injection uses.
+
+- [ ] **Step 6: Update the remaining stale references**
 
 Line 412-421 (`### Ring Contents (show)`): step 1 calls `ensurePreferredAngles()`, step 2 builds a `preferred` list of directions, and a new step describes the slot resolution.
 
@@ -1314,12 +1558,12 @@ Line 549: `SettingsService.ensureAnchorAngles()` becomes `ensurePreferredAngles(
 
 Line 567-570 (`### Layout Tab`): rewrite completely. No 15 degree snapping, no 5 degree collision threshold, no outward 15 degree search. Describe the live simulation: all running apps shown, anchors at 44pt full opacity and draggable, non-pinned at 26pt and 35% opacity and not hit-testable, free drag with a preference hairline and a resolved-slot dot, and the same `RingLayout.compute` call the real ring uses.
 
-- [ ] **Step 6: Confirm no stale references remain**
+- [ ] **Step 7: Confirm no stale references remain**
 
 Run: `grep -n "RecordingIndicator\|pinnedAngles\|dictationAngle\|ensureAnchorAngles\|allAnchorAngles\|15°\|snap" SPEC.md`
 Expected: the only hits are the two UserDefaults key names in the stored-properties table, which are intentionally unchanged.
 
-- [ ] **Step 7: Add the CHANGELOG entry and bump the version**
+- [ ] **Step 8: Add the CHANGELOG entry and bump the version**
 
 At the top of `CHANGELOG.md`, directly below `# Changelog`:
 
@@ -1332,6 +1576,10 @@ At the top of `CHANGELOG.md`, directly below `# Changelog`:
 - Pinned ring positions are now preferred directions rather than fixed angles. The ring is always evenly divided into as many slots as there are items, and each pinned app takes the free slot closest to the direction you dragged it. Clustering three pins in one quadrant no longer crams them together and smears every auto-added app across the rest of the circle. Existing pinned positions are read as preferences, so nothing needs to be set up again.
 - The Layout tab now previews the resolved ring with every running app in it, instead of showing the pinned apps alone. Non-pinned apps are drawn small and dimmed, and rearrange live as you drag. Dragging is free - there is no 15 degree snapping and no collision nudging, because the solver quantizes to slots regardless.
 
+### Fixed
+
+- Pressing Escape to cancel dictation no longer leaks the key press into the app you were typing in. It used to cancel the session and then also close your dialog, dismiss your find bar, or drop you out of your editor's insert mode. Escape is now intercepted for the duration of a session and consumed. This needs Accessibility permission, which Orbit already requires; without it, Escape still cancels dictation exactly as before.
+
 ### Removed
 
 - `RecordingIndicatorPanel`, the floating "Listening…" panel.
@@ -1339,14 +1587,14 @@ At the top of `CHANGELOG.md`, directly below `# Changelog`:
 
 In `project.yml`, change `MARKETING_VERSION: "2.1.0"` to `MARKETING_VERSION: "2.2.0"`.
 
-- [ ] **Step 8: Final build and smoke test**
+- [ ] **Step 9: Final build and smoke test**
 
 Run: `./build.sh`
 Expected: `Copied to ./Orbit.app`, no errors.
 
 Launch it and confirm the whole flow once more end to end: open the ring, switch to an app, open the ring again, run a dictation session and watch the menu bar through it, stop with "Stop Dictation", open Settings → Layout and drag a pinned app, then reopen the ring and confirm it matches.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 npx prettier --write .
