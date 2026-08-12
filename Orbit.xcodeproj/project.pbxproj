@@ -20,6 +20,7 @@
 		A40A689239DCEC22AEC0A8DE /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FBFD987247464C359E6CBEC /* UpdateService.swift */; };
 		A5911D106F4DE7F9469D7464 /* OrbitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B0E64515D2F209A1ACF98A /* OrbitView.swift */; };
 		A75E73FD358C8583C278D71F /* ShortcutRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */; };
+		AF753F9F59404F90FD26082C /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABE9C50DFDD1A720AE7D0CF4 /* StatusItemController.swift */; };
 		B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */; };
 		C317906E1A1CAE792A0C7E9E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9FEF45BFFE010BCA9A5D3000 /* Assets.xcassets */; };
 		C4700FC2697B22DB0E93BD3C /* OrbitItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B59906B22686968DD178A7C6 /* OrbitItem.swift */; };
@@ -47,6 +48,7 @@
 		9FBFD987247464C359E6CBEC /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
 		9FEF45BFFE010BCA9A5D3000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
+		ABE9C50DFDD1A720AE7D0CF4 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
 		B59906B22686968DD178A7C6 /* OrbitItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitItem.swift; sourceTree = "<group>"; };
 		BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayPanel.swift; sourceTree = "<group>"; };
 		CBE9434D67F596027017522B /* AppService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppService.swift; sourceTree = "<group>"; };
@@ -149,6 +151,7 @@
 				BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */,
 				A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */,
 				5BF5FF75E2668C683B3F6460 /* SpeechRecognitionService.swift */,
+				ABE9C50DFDD1A720AE7D0CF4 /* StatusItemController.swift */,
 				9FBFD987247464C359E6CBEC /* UpdateService.swift */,
 			);
 			path = Services;
@@ -245,6 +248,7 @@
 				B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */,
 				A75E73FD358C8583C278D71F /* ShortcutRecorderView.swift in Sources */,
 				593F29D951061FC9A2C89ADE /* SpeechRecognitionService.swift in Sources */,
+				AF753F9F59404F90FD26082C /* StatusItemController.swift in Sources */,
 				A40A689239DCEC22AEC0A8DE /* UpdateService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
