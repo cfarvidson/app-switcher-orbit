@@ -30,6 +30,7 @@ final class SettingsService: ObservableObject {
     @Published var pinnedPreferredAngles: [String: Double]
     @Published var dictationPreferredAngle: Double?
     @Published var dictationInputDeviceUID: String?
+    @Published var dictationLanguages: Set<String>
 
     private let defaults = UserDefaults.standard
 
@@ -62,6 +63,35 @@ final class SettingsService: ObservableObject {
         pinnedPreferredAngles = SettingsService.loadAngleDict(defaults: defaults, key: "pinnedAngles")
         dictationPreferredAngle = defaults.object(forKey: "dictationAngle") as? Double
         dictationInputDeviceUID = defaults.string(forKey: "dictationInputDeviceUID")
+
+        // Distinguish "never configured" from "deliberately cleared". A missing
+        // key means first run, so seed from the languages macOS says the user
+        // reads. An empty stored array means the user unchecked everything, and
+        // must stay empty - re-seeding would make it impossible to turn the
+        // filter off at all.
+        if let stored = defaults.array(forKey: "dictationLanguages") as? [String] {
+            dictationLanguages = Set(stored)
+        } else {
+            dictationLanguages = SettingsService.seedLanguagesFromSystem()
+            defaults.set(Array(dictationLanguages), forKey: "dictationLanguages")
+        }
+    }
+
+    /// Languages to preselect on first run: whatever macOS reports the user
+    /// reads, narrowed to what Parakeet supports. `Locale.preferredLanguages`
+    /// returns tags like "sv-SE" and "en-GB", so compare on the language
+    /// subtag only. Returns an empty set when nothing matches, which is stored
+    /// as such so the seeding is not attempted again on the next launch.
+    private static func seedLanguagesFromSystem() -> Set<String> {
+        let supported = DictationLanguageScope.supportedCodes
+        var result: Set<String> = []
+        for tag in Locale.preferredLanguages {
+            let subtag = String(tag.prefix(while: { $0 != "-" && $0 != "_" })).lowercased()
+            if supported.contains(subtag) {
+                result.insert(subtag)
+            }
+        }
+        return result
     }
 
     /// Converts a UserDefaults-stored dictionary back to `[String: Double]`.
@@ -104,6 +134,7 @@ final class SettingsService: ObservableObject {
         } else {
             defaults.removeObject(forKey: "dictationInputDeviceUID")
         }
+        defaults.set(Array(dictationLanguages), forKey: "dictationLanguages")
     }
 
     // MARK: - Layout angles
