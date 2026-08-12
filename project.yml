@@ -24,13 +24,20 @@ targets:
       base:
         CODE_SIGN_ENTITLEMENTS: Orbit/Resources/Orbit.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.appswitcher
-        MARKETING_VERSION: "2.1.0"
+        MARKETING_VERSION: "2.2.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         INFOPLIST_FILE: Orbit/Info.plist
         COMBINE_HIDPI_IMAGES: true
-        CODE_SIGN_IDENTITY: "-"
+        # Developer ID rather than ad-hoc ("-"). An ad-hoc signature makes the
+        # app's TCC identity its cdhash, which changes on every build, so the
+        # Accessibility grant Orbit needs for its hotkey and for pasting
+        # dictated text died silently after every rebuild. A stable identity
+        # makes the requirement identifier + team, which survives rebuilds.
+        CODE_SIGN_IDENTITY: "Developer ID Application: Arvidson Tech AB (D3LY7SL2HW)"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: D3LY7SL2HW
       configs:
         Debug:
           SWIFT_OPTIMIZATION_LEVEL: "-Onone"

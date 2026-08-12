@@ -59,30 +59,31 @@ final class OrbitViewModel: ObservableObject {
         let pinned = settings.pinnedBundleIds
 
         // Prune/assign angles for current anchored items before layout.
-        settings.ensureAnchorAngles()
+        settings.ensurePreferredAngles()
 
         let allApps = AppService.runningApps(excluding: excluded, pinnedFirst: pinned)
         let pinnedSet = Set(pinned)
         let anchoredApps = allApps.filter { pinnedSet.contains($0.bundleIdentifier ?? "") }
         let nonPinnedApps = allApps.filter { !pinnedSet.contains($0.bundleIdentifier ?? "") }
 
-        // Build the anchored (item, angle) list from the user's stored angles.
-        var anchored: [(OrbitItem, Double)] = []
-        if settings.dictationEnabled, let angle = settings.dictationAngle {
-            anchored.append((.dictation, angle))
+        // Build the preferred (item, direction) list from the user's stored
+        // preferences. These are directions the solver aims for, not positions.
+        var preferred: [(item: OrbitItem, preferredAngle: Double)] = []
+        if settings.dictationEnabled, let angle = settings.dictationPreferredAngle {
+            preferred.append((.dictation, angle))
         }
         for app in anchoredApps {
-            if let bundleId = app.bundleIdentifier, let angle = settings.pinnedAngles[bundleId] {
-                anchored.append((.app(app), angle))
+            if let bundleId = app.bundleIdentifier, let angle = settings.pinnedPreferredAngles[bundleId] {
+                preferred.append((.app(app), angle))
             }
         }
 
-        NSLog("[Orbit.layout] show() dictationAngle=\(String(describing: settings.dictationAngle)) pinAngles=\(settings.pinnedAngles)")
-        NSLog("[Orbit.layout] show() anchored=\(anchored.map { "\($0.0.id)@\(Int($0.1))°" })")
+        NSLog("[Orbit.layout] show() dictationPref=\(String(describing: settings.dictationPreferredAngle)) pinPrefs=\(settings.pinnedPreferredAngles)")
+        NSLog("[Orbit.layout] show() preferred=\(preferred.map { "\($0.item.id)@\(Int($0.preferredAngle))°" })")
 
         positionedItems = RingLayout.compute(
-            anchoredItems: anchored,
-            nonPinned: nonPinnedApps.map(OrbitItem.app)
+            preferred: preferred,
+            others: nonPinnedApps.map(OrbitItem.app)
         )
 
         NSLog("[Orbit.layout] show() positioned=\(positionedItems.map { "\($0.item.id)@\(Int($0.angleDegrees))°\($0.isAnchored ? "*" : "")" })")

@@ -254,7 +254,7 @@ struct SettingsView: View {
                         if settings.dictationEnabled {
                             // Assign an angle now so the tile appears at a
                             // sensible spot the next time the ring opens.
-                            settings.ensureAnchorAngles()
+                            settings.ensurePreferredAngles()
                         }
                     }
 
@@ -320,6 +320,10 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Divider()
+
+                DictationLanguagesView()
             }
         }
         .formStyle(.grouped)

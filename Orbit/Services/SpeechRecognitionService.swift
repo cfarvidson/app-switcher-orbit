@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import Combine
 import CoreAudio
 import CoreGraphics
 import FluidAudio
@@ -20,12 +21,16 @@ import os
 ///   1. `AVAudioEngine` taps the input node and accumulates samples in a
 ///      ring buffer (16 kHz mono float, the format Parakeet expects).
 ///   2. Voice activity detection flushes the buffer to
-///      `AsrManager.transcribe(_:decoderState:)` once the user
-///      pauses (see the VAD section below).
+///      `AsrManager.transcribe(_:decoderState:language:)` once the user
+///      pauses (see the VAD section below). The `language:` argument is the
+///      script hint from `DictationLanguageScope`, not a recognition locale.
 ///   3. When the resulting transcript extends what we've already injected,
 ///      we type the new portion via `CGEvent.keyboardSetUnicodeString`.
-///   4. ESC or any other physical keypress stops the session. Click on the
-///      indicator stops it. Re-triggering Orbit stops it.
+///   4. ESC cancels the session (discarding the buffer) and is swallowed so
+///      it never reaches the app being typed into. Re-triggering Orbit stops
+///      it and commits. "Stop Dictation" in the menu bar stops it and
+///      commits. Session state is published as `dictationState` and rendered
+///      by `StatusItemController` in the menu bar.
 ///
 /// Lazy model load: FluidAudio downloads the Parakeet CoreML model bundle on
 /// first use. There is only one supported model.
@@ -44,6 +49,23 @@ final class SpeechRecognitionService: ObservableObject {
     }
 
     @Published var modelStatus: ModelStatus = .notDownloaded
+
+    /// Presentation-facing dictation lifecycle state. The service publishes it
+    /// and does not care who renders it; `StatusItemController` maps it to a
+    /// menu bar icon treatment.
+    ///
+    /// `.transcribing` covers only the post-stop final flush. Mid-session VAD
+    /// flushes deliberately stay `.listening`: the session is still capturing,
+    /// and flipping the icon on every natural pause would strobe it.
+    enum DictationState: Equatable {
+        case idle
+        case loading(message: String)
+        case starting
+        case listening
+        case transcribing
+    }
+
+    @Published private(set) var dictationState: DictationState = .idle
 
     // MARK: - Parakeet setup
 
@@ -100,11 +122,13 @@ final class SpeechRecognitionService: ObservableObject {
 
     // MARK: - Stop / interaction
 
+    private var escTap: EscapeKeyTap?
+    /// Observe-only fallback, used only when the `CGEvent` tap cannot be
+    /// created. Escape still cancels, but also reaches the frontmost app.
     private var escMonitor: Any?
     private var hardCapWorkItem: DispatchWorkItem?
     private var injectedSoFar: String = ""
     private(set) var isRunning: Bool = false
-    private var indicatorPanel: RecordingIndicatorPanel?
 
     private var starting: Bool = false
     private var lastStartTime: CFTimeInterval = 0
@@ -133,7 +157,15 @@ final class SpeechRecognitionService: ObservableObject {
     /// `cancelWarmup()` actually needs to do anything.
     private var warmupActive: Bool = false
 
-    private init() {}
+    private var stateLogCancellable: AnyCancellable?
+
+    private init() {
+        stateLogCancellable = $dictationState
+            .removeDuplicates()
+            .sink { state in
+                NSLog("[Orbit.dictation] state=\(state)")
+            }
+    }
 
     // MARK: - Public API
 
@@ -279,18 +311,12 @@ final class SpeechRecognitionService: ObservableObject {
             return
         }
 
-        // Replace any existing indicator so we anchor near the user's
-        // current cursor.
-        if indicatorPanel != nil {
-            indicatorPanel?.hideIndicator()
-            indicatorPanel = nil
-        }
-
-        // Show the indicator immediately so the user gets feedback. The
-        // model is downloaded but might still be loading into RAM.
-        let initialState: RecordingIndicatorPanel.State =
-            (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .listening
-        showIndicator(state: initialState)
+        // `.starting`, not `.listening`, when the model is already loaded:
+        // capture has not begun yet, and `beginCapture` below sets `.starting`
+        // anyway. Claiming `.listening` here made the state run backwards
+        // (listening -> starting -> listening within ~150ms), which the old
+        // panel hid but the menu bar icon renders as a visible flicker.
+        dictationState = (asrManager == nil) ? .loading(message: "Loading model\u{2026}") : .starting
 
         ensurePermissions { [weak self] granted in
             guard let self else { return }
@@ -298,8 +324,7 @@ final class SpeechRecognitionService: ObservableObject {
                 NSLog("[Orbit.speech] permission denied")
                 self.starting = false
                 DispatchQueue.main.async {
-                    self.indicatorPanel?.hideIndicator()
-                    self.indicatorPanel = nil
+                    self.dictationState = .idle
                     onError("Microphone permission denied")
                     self.showMicPermissionAlert()
                 }
@@ -311,7 +336,7 @@ final class SpeechRecognitionService: ObservableObject {
                     if self.warmupActive {
                         self.promoteWarmupToSession()
                     } else {
-                        self.indicatorPanel?.updateState(.starting)
+                        self.dictationState = .starting
                         self.beginCapture(onError: onError)
                     }
                 }
@@ -364,9 +389,9 @@ final class SpeechRecognitionService: ObservableObject {
     ///     audio buffer is transcribed and injected as a final utterance
     ///     before tearing down. When `false`, the buffer is discarded —
     ///     used by ESC because the macOS Dictation convention is "ESC
-    ///     cancels". The hotkey re-trigger and the indicator click both
-    ///     commit (flushBuffer=true) because pressing those means "I'm
-    ///     done", not "throw it away".
+    ///     cancels". The hotkey re-trigger and the menu bar "Stop Dictation"
+    ///     command both commit (flushBuffer=true) because using those means
+    ///     "I'm done", not "throw it away".
     func stop(reason: String = "explicit", flushBuffer: Bool = true) {
         hardCapWorkItem?.cancel()
         hardCapWorkItem = nil
@@ -392,13 +417,12 @@ final class SpeechRecognitionService: ObservableObject {
         }
         audioEngine.inputNode.removeTap(onBus: 0)
 
+        escTap?.stop()
+        escTap = nil
         if let monitor = escMonitor {
             NSEvent.removeMonitor(monitor)
             escMonitor = nil
         }
-
-        indicatorPanel?.hideIndicator()
-        indicatorPanel = nil
 
         hasSpeechInBuffer = false
         silentSamplesAfterSpeech = 0
@@ -408,8 +432,8 @@ final class SpeechRecognitionService: ObservableObject {
         isRunning = false
 
         // Final flush. Runs async — by the time the transcript lands,
-        // the indicator is already hidden and the user has presumably
-        // refocused their target text field. We deliberately do NOT
+        // the menu bar has already returned to idle and the user has
+        // presumably refocused their target text field. We deliberately do NOT
         // reset `injectedSoFar` until after the final flush has been
         // dispatched so multi-utterance sessions still get the leading
         // space treatment for the last chunk.
@@ -427,6 +451,7 @@ final class SpeechRecognitionService: ObservableObject {
         if flushBuffer, hadSpeech, finalSnapshot.count > minSamples, let manager = asrManager, !transcribing {
             NSLog("[Orbit.speech] stop: final flush \(String(format: "%.2f", Double(finalSnapshot.count) / targetSampleRate))s audio")
             transcribing = true
+            dictationState = .transcribing
             Task { [weak self] in
                 guard let self else { return }
                 do {
@@ -435,23 +460,30 @@ final class SpeechRecognitionService: ObservableObject {
                     // above), so there's no continuity to carry across calls.
                     let decoderLayers = await manager.decoderLayerCount
                     var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-                    let result = try await manager.transcribe(finalSnapshot, decoderState: &decoderState)
+                    let result = try await manager.transcribe(
+                        finalSnapshot,
+                        decoderState: &decoderState,
+                        language: DictationLanguageScope.hint(for: SettingsService.shared.dictationLanguages)
+                    )
                     let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     await MainActor.run {
                         self.handleFlushedTranscript(text)
                         self.injectedSoFar = ""
                         self.transcribing = false
+                        self.dictationState = .idle
                     }
                 } catch {
                     NSLog("[Orbit.speech] final flush transcribe error: \(error.localizedDescription)")
                     await MainActor.run {
                         self.injectedSoFar = ""
                         self.transcribing = false
+                        self.dictationState = .idle
                     }
                 }
             }
         } else {
             injectedSoFar = ""
+            dictationState = .idle
         }
     }
 
@@ -506,8 +538,7 @@ final class SpeechRecognitionService: ObservableObject {
         await downloadAndLoadModel()
         if asrManager == nil {
             onError("Failed to load the Parakeet model. Set up dictation in Settings → Dictation.")
-            indicatorPanel?.hideIndicator()
-            indicatorPanel = nil
+            dictationState = .idle
         }
     }
 
@@ -551,7 +582,7 @@ final class SpeechRecognitionService: ObservableObject {
         isRunning = true
         // The engine has been delivering buffers since warmup; flip indicator
         // straight to .listening (skip the .starting state, no startup gap).
-        indicatorPanel?.updateState(.listening)
+        dictationState = .listening
         NSLog("[Orbit.speech] promoted warmup to session, preroll=\(audioBuffer.count) samples")
     }
 
@@ -618,8 +649,7 @@ final class SpeechRecognitionService: ObservableObject {
         } catch {
             NSLog("[Orbit.speech] audio engine failed to start: \(error)")
             onError("Audio engine failed to start: \(error.localizedDescription)")
-            indicatorPanel?.hideIndicator()
-            indicatorPanel = nil
+            dictationState = .idle
             return
         }
 
@@ -716,7 +746,7 @@ final class SpeechRecognitionService: ObservableObject {
 
         if shouldFlipToListening {
             DispatchQueue.main.async { [weak self] in
-                self?.indicatorPanel?.updateState(.listening)
+                self?.dictationState = .listening
             }
         }
 
@@ -749,6 +779,7 @@ final class SpeechRecognitionService: ObservableObject {
 
         transcribing = true
         NSLog("[Orbit.speech] flushing \(Double(snapshot.count) / targetSampleRate)s of audio for transcription")
+        NSLog("[Orbit.speech] language hint=\(String(describing: DictationLanguageScope.hint(for: SettingsService.shared.dictationLanguages)))")
 
         Task { [weak self] in
             guard let self else { return }
@@ -758,7 +789,11 @@ final class SpeechRecognitionService: ObservableObject {
                 // above), so there's no continuity to carry across calls.
                 let decoderLayers = await manager.decoderLayerCount
                 var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-                let result = try await manager.transcribe(snapshot, decoderState: &decoderState)
+                let result = try await manager.transcribe(
+                    snapshot,
+                    decoderState: &decoderState,
+                    language: DictationLanguageScope.hint(for: SettingsService.shared.dictationLanguages)
+                )
                 let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 await MainActor.run {
                     self.handleFlushedTranscript(text)
@@ -890,17 +925,29 @@ final class SpeechRecognitionService: ObservableObject {
     // MARK: - Stop triggers
 
     private func installEscMonitor() {
-        // ESC-only stop. The "stop on any keypress" variant was killing
-        // legitimate dictation sessions whenever any incidental keystroke
-        // arrived between audio capture and the model finishing
-        // transcription (~600ms latency). Users who want to switch from
-        // dictation to typing should press ESC, click the indicator, or
-        // re-trigger Orbit.
+        // ESC = cancel (matches macOS Dictation). Discards the audio buffer
+        // instead of transcribing it.
+        //
+        // The tap swallows the key so it never reaches the app the user is
+        // typing into. Without that, cancelling dictation inside a dialog or a
+        // modal editor would also dismiss it.
+        //
+        // "Stop on any keypress" was tried and reverted: it killed legitimate
+        // sessions whenever an incidental keystroke arrived between audio
+        // capture and the model finishing transcription (~600ms). Users who
+        // want to switch from dictation to typing should press ESC, use
+        // "Stop Dictation" in the menu bar, or re-trigger Orbit.
+        let tap = EscapeKeyTap { [weak self] in
+            self?.stop(reason: "esc", flushBuffer: false)
+        }
+        if tap.start() {
+            escTap = tap
+            return
+        }
+
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return }
             if event.keyCode != 53 { return }  // kVK_Escape
-            // ESC = cancel (matches macOS Dictation). Discards the audio
-            // buffer instead of transcribing it.
             DispatchQueue.main.async { self.stop(reason: "esc", flushBuffer: false) }
         }
     }
@@ -913,15 +960,6 @@ final class SpeechRecognitionService: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 60, execute: work)
     }
 
-    // MARK: - Indicator
-
-    private func showIndicator(state: RecordingIndicatorPanel.State) {
-        let panel = RecordingIndicatorPanel()
-        panel.show(state: state) { [weak self] in
-            DispatchQueue.main.async { self?.stop(reason: "indicator click") }
-        }
-        indicatorPanel = panel
-    }
 }
 
 extension Notification.Name {

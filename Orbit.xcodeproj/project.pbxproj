@@ -11,15 +11,19 @@
 		0F2835DDB7523577F8219883 /* AudioInputDeviceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98405B8A69B5B1BA8DC75082 /* AudioInputDeviceService.swift */; };
 		2269A96732CB42EA5C5DD105 /* AppIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4958B2634D8439242ED1028F /* AppIconView.swift */; };
 		2A49C7AB49AF925F710395B7 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */; };
+		2B99F71FE4018A4F90193B71 /* EscapeKeyTap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D0A9AEA7188B85774E22690 /* EscapeKeyTap.swift */; };
 		34C80F3712FAF719C2C3D455 /* OverlayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */; };
 		4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE9434D67F596027017522B /* AppService.swift */; };
 		593F29D951061FC9A2C89ADE /* SpeechRecognitionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BF5FF75E2668C683B3F6460 /* SpeechRecognitionService.swift */; };
+		5EC97543F630A5BE05CF86F6 /* DictationLanguagesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB924AA865D3B00102D8825 /* DictationLanguagesView.swift */; };
 		76061C98C618303FC707F143 /* RunningApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3785CD7C0BD802AE20E35888 /* RunningApp.swift */; };
+		82624744330FA0A91868E0BD /* DictationLanguageScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B763598E0C62610D896E687 /* DictationLanguageScope.swift */; };
 		873A3B554C2E9B9F43ACDAE0 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = D4131CB423050542CBF672D2 /* FluidAudio */; };
 		A329264775F189B4E845781A /* DictationTileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55310747335F2AE5F09BFEDC /* DictationTileView.swift */; };
 		A40A689239DCEC22AEC0A8DE /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FBFD987247464C359E6CBEC /* UpdateService.swift */; };
 		A5911D106F4DE7F9469D7464 /* OrbitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B0E64515D2F209A1ACF98A /* OrbitView.swift */; };
 		A75E73FD358C8583C278D71F /* ShortcutRecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */; };
+		AF753F9F59404F90FD26082C /* StatusItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABE9C50DFDD1A720AE7D0CF4 /* StatusItemController.swift */; };
 		B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */; };
 		C317906E1A1CAE792A0C7E9E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9FEF45BFFE010BCA9A5D3000 /* Assets.xcassets */; };
 		C4700FC2697B22DB0E93BD3C /* OrbitItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B59906B22686968DD178A7C6 /* OrbitItem.swift */; };
@@ -27,15 +31,16 @@
 		D7FDA8AC9981F577AF880764 /* LayoutPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F52A45A2D15CB617E0E7BF7 /* LayoutPreviewView.swift */; };
 		DF39D33FF39D1EBBEC47E523 /* RingLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F284CDE33E08C0AF7D7319 /* RingLayout.swift */; };
 		F204E258AC938FD314360C36 /* SettingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */; };
-		F505F3499DB37B479F12C584 /* RecordingIndicatorPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B1A8EA92966D1BCAC801CC /* RecordingIndicatorPanel.swift */; };
 		FE1F71420B0761A4E62AA824 /* OrbitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26EB023126B42D85C78E726C /* OrbitApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		15B0E64515D2F209A1ACF98A /* OrbitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitView.swift; sourceTree = "<group>"; };
 		26EB023126B42D85C78E726C /* OrbitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitApp.swift; sourceTree = "<group>"; };
+		2B763598E0C62610D896E687 /* DictationLanguageScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationLanguageScope.swift; sourceTree = "<group>"; };
 		3785CD7C0BD802AE20E35888 /* RunningApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunningApp.swift; sourceTree = "<group>"; };
 		4958B2634D8439242ED1028F /* AppIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIconView.swift; sourceTree = "<group>"; };
+		4D0A9AEA7188B85774E22690 /* EscapeKeyTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscapeKeyTap.swift; sourceTree = "<group>"; };
 		4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		55310747335F2AE5F09BFEDC /* DictationTileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationTileView.swift; sourceTree = "<group>"; };
 		5BF5FF75E2668C683B3F6460 /* SpeechRecognitionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognitionService.swift; sourceTree = "<group>"; };
@@ -47,13 +52,14 @@
 		9FBFD987247464C359E6CBEC /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
 		9FEF45BFFE010BCA9A5D3000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsService.swift; sourceTree = "<group>"; };
+		ABE9C50DFDD1A720AE7D0CF4 /* StatusItemController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusItemController.swift; sourceTree = "<group>"; };
+		ADB924AA865D3B00102D8825 /* DictationLanguagesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationLanguagesView.swift; sourceTree = "<group>"; };
 		B59906B22686968DD178A7C6 /* OrbitItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitItem.swift; sourceTree = "<group>"; };
 		BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayPanel.swift; sourceTree = "<group>"; };
 		CBE9434D67F596027017522B /* AppService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppService.swift; sourceTree = "<group>"; };
 		CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorderView.swift; sourceTree = "<group>"; };
 		E22E05EF10B63C9D1DC5C6B3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		E691E1A576C579A627A7BDDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		F3B1A8EA92966D1BCAC801CC /* RecordingIndicatorPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingIndicatorPanel.swift; sourceTree = "<group>"; };
 		FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -95,6 +101,7 @@
 		67396201ACDD149AA1629C59 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				2B763598E0C62610D896E687 /* DictationLanguageScope.swift */,
 				B59906B22686968DD178A7C6 /* OrbitItem.swift */,
 				72F284CDE33E08C0AF7D7319 /* RingLayout.swift */,
 				3785CD7C0BD802AE20E35888 /* RunningApp.swift */,
@@ -114,10 +121,10 @@
 			isa = PBXGroup;
 			children = (
 				4958B2634D8439242ED1028F /* AppIconView.swift */,
+				ADB924AA865D3B00102D8825 /* DictationLanguagesView.swift */,
 				55310747335F2AE5F09BFEDC /* DictationTileView.swift */,
 				5F52A45A2D15CB617E0E7BF7 /* LayoutPreviewView.swift */,
 				15B0E64515D2F209A1ACF98A /* OrbitView.swift */,
-				F3B1A8EA92966D1BCAC801CC /* RecordingIndicatorPanel.swift */,
 				4E37DA3D4A718D5948DEF3A7 /* SettingsView.swift */,
 				CEDE39562E6753365A21F902 /* ShortcutRecorderView.swift */,
 			);
@@ -145,10 +152,12 @@
 			children = (
 				CBE9434D67F596027017522B /* AppService.swift */,
 				98405B8A69B5B1BA8DC75082 /* AudioInputDeviceService.swift */,
+				4D0A9AEA7188B85774E22690 /* EscapeKeyTap.swift */,
 				FAD565E5A2A9FD2A8B0BA707 /* HotkeyService.swift */,
 				BBB68C04B60983B36FAE7632 /* OverlayPanel.swift */,
 				A9BE8AAF02EE8031C001ACFA /* SettingsService.swift */,
 				5BF5FF75E2668C683B3F6460 /* SpeechRecognitionService.swift */,
+				ABE9C50DFDD1A720AE7D0CF4 /* StatusItemController.swift */,
 				9FBFD987247464C359E6CBEC /* UpdateService.swift */,
 			);
 			path = Services;
@@ -186,6 +195,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					B87EF018B641D85E34ED2D32 = {
+						DevelopmentTeam = D3LY7SL2HW;
+						ProvisioningStyle = Manual;
+					};
 				};
 			};
 			buildConfigurationList = 3B09B19ED5B1850084012594 /* Build configuration list for PBXProject "Orbit" */;
@@ -230,7 +243,10 @@
 				2269A96732CB42EA5C5DD105 /* AppIconView.swift in Sources */,
 				4A6E8861618C0E28B8034C42 /* AppService.swift in Sources */,
 				0F2835DDB7523577F8219883 /* AudioInputDeviceService.swift in Sources */,
+				82624744330FA0A91868E0BD /* DictationLanguageScope.swift in Sources */,
+				5EC97543F630A5BE05CF86F6 /* DictationLanguagesView.swift in Sources */,
 				A329264775F189B4E845781A /* DictationTileView.swift in Sources */,
+				2B99F71FE4018A4F90193B71 /* EscapeKeyTap.swift in Sources */,
 				2A49C7AB49AF925F710395B7 /* HotkeyService.swift in Sources */,
 				D7FDA8AC9981F577AF880764 /* LayoutPreviewView.swift in Sources */,
 				FE1F71420B0761A4E62AA824 /* OrbitApp.swift in Sources */,
@@ -238,13 +254,13 @@
 				A5911D106F4DE7F9469D7464 /* OrbitView.swift in Sources */,
 				0A629DD297BCDCB3D84FD808 /* OrbitViewModel.swift in Sources */,
 				34C80F3712FAF719C2C3D455 /* OverlayPanel.swift in Sources */,
-				F505F3499DB37B479F12C584 /* RecordingIndicatorPanel.swift in Sources */,
 				DF39D33FF39D1EBBEC47E523 /* RingLayout.swift in Sources */,
 				76061C98C618303FC707F143 /* RunningApp.swift in Sources */,
 				F204E258AC938FD314360C36 /* SettingsService.swift in Sources */,
 				B453DEBCA4D678859B1058AD /* SettingsView.swift in Sources */,
 				A75E73FD358C8583C278D71F /* ShortcutRecorderView.swift in Sources */,
 				593F29D951061FC9A2C89ADE /* SpeechRecognitionService.swift in Sources */,
+				AF753F9F59404F90FD26082C /* StatusItemController.swift in Sources */,
 				A40A689239DCEC22AEC0A8DE /* UpdateService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -257,16 +273,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Orbit/Resources/Orbit.entitlements;
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "Developer ID Application: Arvidson Tech AB (D3LY7SL2HW)";
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = D3LY7SL2HW;
 				INFOPLIST_FILE = Orbit/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.orbit.appswitcher;
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -335,16 +353,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Orbit/Resources/Orbit.entitlements;
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "Developer ID Application: Arvidson Tech AB (D3LY7SL2HW)";
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = D3LY7SL2HW;
 				INFOPLIST_FILE = Orbit/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.orbit.appswitcher;
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";

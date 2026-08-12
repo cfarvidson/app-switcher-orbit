@@ -27,9 +27,10 @@ final class SettingsService: ObservableObject {
     @Published var excludedBundleIds: Set<String>
     @Published var dictationEnabled: Bool
     @Published var dictationSilenceTriggerSeconds: Double
-    @Published var pinnedAngles: [String: Double]
-    @Published var dictationAngle: Double?
+    @Published var pinnedPreferredAngles: [String: Double]
+    @Published var dictationPreferredAngle: Double?
     @Published var dictationInputDeviceUID: String?
+    @Published var dictationLanguages: Set<String>
 
     private let defaults = UserDefaults.standard
 
@@ -59,9 +60,38 @@ final class SettingsService: ObservableObject {
         dictationSilenceTriggerSeconds = defaults.object(forKey: "dictationSilenceTriggerSeconds") != nil
             ? defaults.double(forKey: "dictationSilenceTriggerSeconds")
             : 0.8
-        pinnedAngles = SettingsService.loadAngleDict(defaults: defaults, key: "pinnedAngles")
-        dictationAngle = defaults.object(forKey: "dictationAngle") as? Double
+        pinnedPreferredAngles = SettingsService.loadAngleDict(defaults: defaults, key: "pinnedAngles")
+        dictationPreferredAngle = defaults.object(forKey: "dictationAngle") as? Double
         dictationInputDeviceUID = defaults.string(forKey: "dictationInputDeviceUID")
+
+        // Distinguish "never configured" from "deliberately cleared". A missing
+        // key means first run, so seed from the languages macOS says the user
+        // reads. An empty stored array means the user unchecked everything, and
+        // must stay empty - re-seeding would make it impossible to turn the
+        // filter off at all.
+        if let stored = defaults.array(forKey: "dictationLanguages") as? [String] {
+            dictationLanguages = Set(stored)
+        } else {
+            dictationLanguages = SettingsService.seedLanguagesFromSystem()
+            defaults.set(Array(dictationLanguages), forKey: "dictationLanguages")
+        }
+    }
+
+    /// Languages to preselect on first run: whatever macOS reports the user
+    /// reads, narrowed to what Parakeet supports. `Locale.preferredLanguages`
+    /// returns tags like "sv-SE" and "en-GB", so compare on the language
+    /// subtag only. Returns an empty set when nothing matches, which is stored
+    /// as such so the seeding is not attempted again on the next launch.
+    private static func seedLanguagesFromSystem() -> Set<String> {
+        let supported = DictationLanguageScope.supportedCodes
+        var result: Set<String> = []
+        for tag in Locale.preferredLanguages {
+            let subtag = String(tag.prefix(while: { $0 != "-" && $0 != "_" })).lowercased()
+            if supported.contains(subtag) {
+                result.insert(subtag)
+            }
+        }
+        return result
     }
 
     /// Converts a UserDefaults-stored dictionary back to `[String: Double]`.
@@ -93,8 +123,8 @@ final class SettingsService: ObservableObject {
         defaults.set(Array(excludedBundleIds), forKey: "excludedBundleIds")
         defaults.set(dictationEnabled, forKey: "dictationEnabled")
         defaults.set(dictationSilenceTriggerSeconds, forKey: "dictationSilenceTriggerSeconds")
-        defaults.set(pinnedAngles, forKey: "pinnedAngles")
-        if let angle = dictationAngle {
+        defaults.set(pinnedPreferredAngles, forKey: "pinnedAngles")
+        if let angle = dictationPreferredAngle {
             defaults.set(angle, forKey: "dictationAngle")
         } else {
             defaults.removeObject(forKey: "dictationAngle")
@@ -104,6 +134,7 @@ final class SettingsService: ObservableObject {
         } else {
             defaults.removeObject(forKey: "dictationInputDeviceUID")
         }
+        defaults.set(Array(dictationLanguages), forKey: "dictationLanguages")
     }
 
     // MARK: - Layout angles
@@ -111,49 +142,49 @@ final class SettingsService: ObservableObject {
     /// All currently known anchored angles in one flat list (pinned apps +
     /// the dictation tile). Used by the default-placement algorithm when
     /// adding a new anchor.
-    var allAnchorAngles: [Double] {
-        var all = Array(pinnedAngles.values)
-        if let angle = dictationAngle {
+    var allPreferredAngles: [Double] {
+        var all = Array(pinnedPreferredAngles.values)
+        if let angle = dictationPreferredAngle {
             all.append(angle)
         }
         return all
     }
 
     /// Ensures every currently-pinned bundle id, and the dictation tile when
-    /// enabled, has a stored angle. Newly seen items are placed at the center
-    /// of the largest currently-empty arc (Hitman weapon-wheel style), then
-    /// auto-saved. Called on every ring show so the storage is always in sync
-    /// with the user's pin/dictation selections.
-    func ensureAnchorAngles() {
+    /// enabled, has a stored preferred direction. Newly seen items get the
+    /// center of the largest currently-empty arc, then auto-save. A preference
+    /// is a direction the ring solver aims for, not a fixed position: the item
+    /// lands on whichever free slot sits closest to it.
+    func ensurePreferredAngles() {
         var changed = false
 
-        for bundleId in pinnedBundleIds where pinnedAngles[bundleId] == nil {
-            let angle = RingLayout.nextAnchorAngle(existingAngles: allAnchorAngles)
-            pinnedAngles[bundleId] = angle
+        for bundleId in pinnedBundleIds where pinnedPreferredAngles[bundleId] == nil {
+            let angle = RingLayout.nextAnchorAngle(existingAngles: allPreferredAngles)
+            pinnedPreferredAngles[bundleId] = angle
             changed = true
         }
 
-        if dictationEnabled, dictationAngle == nil {
-            dictationAngle = RingLayout.nextAnchorAngle(existingAngles: allAnchorAngles)
+        if dictationEnabled, dictationPreferredAngle == nil {
+            dictationPreferredAngle = RingLayout.nextAnchorAngle(existingAngles: allPreferredAngles)
             changed = true
         }
 
         // Prune angles for bundles that are no longer pinned so the
         // dictionary doesn't grow unbounded over time.
         let pinnedSet = Set(pinnedBundleIds)
-        for key in pinnedAngles.keys where !pinnedSet.contains(key) {
-            pinnedAngles.removeValue(forKey: key)
+        for key in pinnedPreferredAngles.keys where !pinnedSet.contains(key) {
+            pinnedPreferredAngles.removeValue(forKey: key)
             changed = true
         }
 
         if changed { save() }
     }
 
-    /// Wipes all stored angles; next `ensureAnchorAngles` call reassigns
+    /// Wipes all stored angles; next `ensurePreferredAngles` call reassigns
     /// defaults for the current pinned set and the dictation tile.
     func resetLayoutAngles() {
-        pinnedAngles = [:]
-        dictationAngle = nil
+        pinnedPreferredAngles = [:]
+        dictationPreferredAngle = nil
         save()
     }
 

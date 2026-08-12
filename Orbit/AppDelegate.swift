@@ -3,21 +3,21 @@ import Combine
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var statusItem: NSStatusItem!
+    private var statusItemController: StatusItemController!
     private var overlayPanel: OverlayPanel?
     private var hotkeyService: HotkeyService!
     private let viewModel = OrbitViewModel()
     private let settings = SettingsService.shared
     private var cancellables = Set<AnyCancellable>()
     private var settingsWindow: NSWindow?
-    private var activationMenuItem: NSMenuItem?
-    private var inputModeMenuItem: NSMenuItem?
-    private var updateMenuItem: NSMenuItem?
     private var lastToggleTime: Date = .distantPast
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         promptAccessibilityIfNeeded()
-        setupStatusItem()
+        statusItemController = StatusItemController(
+            activationTitle: activationDisplayString(),
+            inputModeTitle: inputModeDisplayString()
+        )
         setupHotkey()
         setupOverlayPanel()
         observeSettingsChanges()
@@ -92,49 +92,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func setupStatusItem() {
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        if let button = statusItem.button {
-            button.image = NSImage(
-                systemSymbolName: "circle.dotted",
-                accessibilityDescription: "Orbit"
-            )
-        }
-
-        let menu = NSMenu()
-
-        let activation = NSMenuItem(title: activationDisplayString(), action: nil, keyEquivalent: "")
-        activation.isEnabled = false
-        menu.addItem(activation)
-        activationMenuItem = activation
-
-        let inputMode = NSMenuItem(title: inputModeDisplayString(), action: nil, keyEquivalent: "")
-        inputMode.isEnabled = false
-        menu.addItem(inputMode)
-        inputModeMenuItem = inputMode
-
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(
-            NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ",")
-        )
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(
-            NSMenuItem(title: "Check for Updates\u{2026}", action: #selector(checkForUpdateManual), keyEquivalent: "")
-        )
-        menu.addItem(
-            NSMenuItem(title: "About Orbit", action: #selector(showAbout), keyEquivalent: "")
-        )
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(
-            NSMenuItem(
-                title: "Quit Orbit",
-                action: #selector(NSApplication.terminate(_:)),
-                keyEquivalent: "q"
-            )
-        )
-        statusItem.menu = menu
-    }
-
     private func setupHotkey() {
         hotkeyService = HotkeyService { [weak self] in
             self?.toggleOrbit()
@@ -156,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] _, _, _, _ in
                 guard let self else { return }
                 self.hotkeyService.registerFromSettings(self.settings)
-                self.activationMenuItem?.title = self.activationDisplayString()
+                self.statusItemController.setActivationTitle(self.activationDisplayString())
             }
             .store(in: &cancellables)
 
@@ -165,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .dropFirst()
             .sink { [weak self] _ in
                 guard let self else { return }
-                self.inputModeMenuItem?.title = self.inputModeDisplayString()
+                self.statusItemController.setInputModeTitle(self.inputModeDisplayString())
             }
             .store(in: &cancellables)
     }
@@ -224,29 +181,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func checkForUpdateManual() {
+    @objc func checkForUpdateManual() {
         checkForUpdate(silent: false)
     }
 
     private func showUpdateMenuItem(_ release: UpdateService.Release) {
-        // Remove existing update item if present
-        if let existing = updateMenuItem {
-            if let index = statusItem.menu?.index(of: existing), index >= 0 {
-                statusItem.menu?.removeItem(at: index + 1) // separator
-                statusItem.menu?.removeItem(existing)
-            }
-        }
-
-        let item = NSMenuItem(
+        statusItemController.showUpdateItem(
             title: "Update Available (v\(release.version))",
-            action: #selector(openUpdate(_:)),
-            keyEquivalent: ""
+            url: release.url,
+            target: self,
+            action: #selector(openUpdate(_:))
         )
-        item.target = self
-        item.representedObject = release.url
-        statusItem.menu?.insertItem(item, at: 0)
-        statusItem.menu?.insertItem(NSMenuItem.separator(), at: 1)
-        updateMenuItem = item
     }
 
     private func showUpToDateAlert() {
@@ -265,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings window
 
-    @objc private func openSettings() {
+    @objc func openSettings() {
         if let window = settingsWindow, window.isVisible {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate()
@@ -287,7 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow = window
     }
 
-    @objc private func showAbout() {
+    @objc func showAbout() {
         let credits = NSMutableAttributedString()
         credits.append(NSAttributedString(
             string: "By Carl-Fredrik Arvidson\n",
