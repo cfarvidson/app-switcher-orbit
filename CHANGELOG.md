@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.1
+
+### Fixed
+
+- GitHub downloads are now Developer ID notarized with Hardened Runtime, so Gatekeeper no longer shows "Apple could not verify Orbit.app". v2.2.0 was signed but not notarized.
+
 ## 2.2.0
 
 ### Changed

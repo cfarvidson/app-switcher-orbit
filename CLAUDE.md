@@ -68,14 +68,25 @@ Checklist:
 3. Update `SPEC.md`.
 4. `./test.sh` and `./build.sh`.
 5. Confirm the built app's version: `/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Orbit.app/Contents/Info.plist`
-6. Zip (do not commit the zip; `Orbit-*.zip` is gitignored):
+6. Confirm Hardened Runtime and no `get-task-allow`: `codesign -dv --verbose=4 Orbit.app` should show `flags=0x10000(runtime)`. `codesign -d --entitlements - Orbit.app` must not list `get-task-allow`.
+7. Notarize (required for GitHub downloads; otherwise Gatekeeper shows "Apple could not verify Orbit.app"):
+
+```
+# one-time, app-specific password from appleid.apple.com
+xcrun notarytool store-credentials orbit-notary \
+  --apple-id carl-fredrik@arvidson.io \
+  --team-id D3LY7SL2HW
+./notarize.sh
+```
+
+8. Zip the **stapled** app (do not commit the zip; `Orbit-*.zip` is gitignored):
 
 ```
 ditto -c -k --keepParent Orbit.app Orbit-X.Y.Z.zip
 ```
 
-7. Commit, push `main`.
-8. Publish:
+9. Commit, push `main`.
+10. Publish:
 
 ```
 gh release create vX.Y.Z Orbit-X.Y.Z.zip \
@@ -85,7 +96,9 @@ gh release create vX.Y.Z Orbit-X.Y.Z.zip \
 
 Release notes should be the `## X.Y.Z` CHANGELOG section (that is what v1.1.0 used). After publish, the in-app "Update Available" item appears on the next check.
 
-There is no notarization step in `build.sh` today. Gatekeeper may warn on first open of a downloaded zip.
+Do not ship a GitHub zip that has not been notarized. v2.2.0 was signed but not notarized; Gatekeeper blocks the download. Local `./build.sh` + `open Orbit.app` is fine (no quarantine). A quarantined download needs a staple.
+
+Release config: `ENABLE_HARDENED_RUNTIME=YES`, `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO`, `--timestamp`. Entitlements: sandbox off, `com.apple.security.device.audio-input` on.
 
 ## Do not
 

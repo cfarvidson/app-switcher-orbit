@@ -687,6 +687,7 @@ Key entries:
 ## Entitlements
 
 - `com.apple.security.app-sandbox` = `false`
+- `com.apple.security.device.audio-input` = `true` (required once Hardened Runtime is on; dictation uses the mic)
 
 ## Build Configuration
 
@@ -694,8 +695,10 @@ Key entries:
 - Swift version: 5.9
 - Xcode `ASSETCATALOG_COMPILER_APPICON_NAME` = `AppIcon`
 - App code sign identity: Developer ID (`Arvidson Tech AB`, team `D3LY7SL2HW`)
+- Release: Hardened Runtime on, no injected `get-task-allow`, secure timestamp. Required for notarization.
+- GitHub zips must be notarized (`./notarize.sh`) and stapled before publish. An unnotarized Developer ID build is what produces "Apple could not verify Orbit.app".
 - `OrbitTests` is a unit-test bundle that compiles `Orbit/Models` plus tests; it does not host `Orbit.app`. Sign identity `-`.
-- Build: `./build.sh`. Test: `./test.sh`.
+- Build: `./build.sh`. Test: `./test.sh`. Notarize: `./notarize.sh`.
 
 ## User Flow
 

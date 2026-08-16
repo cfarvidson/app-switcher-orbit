@@ -34,7 +34,7 @@ targets:
       base:
         CODE_SIGN_ENTITLEMENTS: Orbit/Resources/Orbit.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: com.orbit.appswitcher
-        MARKETING_VERSION: "2.2.0"
+        MARKETING_VERSION: "2.2.1"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -53,6 +53,11 @@ targets:
           SWIFT_OPTIMIZATION_LEVEL: "-Onone"
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
+          # Required for Developer ID notarization. Debug stays off so lldb
+          # can still attach. get-task-allow must not ship in Release.
+          ENABLE_HARDENED_RUNTIME: YES
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+          OTHER_CODE_SIGN_FLAGS: "--timestamp"
   OrbitTests:
     type: bundle.unit-test
     platform: macOS
