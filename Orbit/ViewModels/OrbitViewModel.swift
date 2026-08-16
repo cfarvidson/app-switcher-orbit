@@ -91,13 +91,10 @@ final class OrbitViewModel: ObservableObject {
         selectedIndex = nil
         isVisible = true
         startMonitors()
-
-        // Pre-roll audio capture so the first phoneme spoken when the user
-        // clicks a tile is not lost to AVAudioEngine startup latency. No-op
-        // if mic permission isn't granted yet (no surprise prompts).
-        if SettingsService.shared.dictationEnabled {
-            SpeechRecognitionService.shared.warmupAudioCapture()
-        }
+        // Do not start the microphone here. Opening the ring used to call
+        // warmupAudioCapture(), which takes the input device and makes
+        // macOS pause video. Capture starts only when the dictation tile
+        // is selected.
     }
 
     func dismiss() {

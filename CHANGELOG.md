@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Opening the Orbit ring no longer starts the microphone. Pre-roll capture on `show()` took the input device and paused video in browsers and players. The mic starts only when you select the dictation tile.
 - Dictation feedback moved from a floating panel near the cursor into the menu bar icon. The panel sat exactly where you were working; the icon now carries the whole session through five visible states - a dimmed breathing dotted circle while the model loads, a dimmed static waveform while the microphone is starting up, an accent-colored breathing waveform while listening, a static ellipsis while the final utterance is transcribed, and the plain dotted circle at rest. The menu grows a status line and a "Stop Dictation" command while a session is live, replacing the panel's click-to-stop. ESC still cancels and the hotkey still stops and commits, both unchanged.
 - Pinned ring positions are now preferred directions rather than fixed angles. The ring is always evenly divided into as many slots as there are items, and each pinned app takes the free slot closest to the direction you dragged it. Clustering three pins in one quadrant no longer crams them together and smears every auto-added app across the rest of the circle. Existing pinned positions are read as preferences, so nothing needs to be set up again.
 - Dictation can now be limited to the languages you actually speak. Parakeet detects language on its own and would occasionally decide Swedish was Russian, pasting Cyrillic gibberish into whatever you were typing in. Settings > Dictation > Languages lets you pick your languages, and Orbit constrains the decoder to that alphabet. The list is preselected from your macOS language settings, so it works without being configured. Picking languages from different alphabets turns filtering off, and the setting says so rather than looking active while doing nothing.
@@ -11,7 +12,10 @@
 
 ### Fixed
 
+- Settings no longer tells you to click the deleted floating listening indicator. Stop is the menu bar command, the hotkey, or ESC.
+- The Settings window is resizable (520×720, min 520×560) so the Dictation tab is no longer clipped below a 640 pt frame.
 - Pressing Escape to cancel dictation no longer leaks the key press into the app you were typing in. It used to cancel the session and then also close your dialog, dismiss your find bar, or drop you out of your editor's insert mode. Escape is now intercepted for the duration of a session and consumed. This needs Accessibility permission, which Orbit already requires; without it, Escape still cancels dictation exactly as before.
+- Flushed transcripts are logged by character count, not the spoken text.
 
 ### Removed
 

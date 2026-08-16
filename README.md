@@ -26,7 +26,7 @@ A macOS radial app switcher inspired by Hitman's weapon wheel. Press a shortcut 
 - **On-device dictation** - an opt-in dictation tile in the ring runs NVIDIA Parakeet TDT 0.6B v3 through [FluidAudio](https://github.com/FluidInference/FluidAudio) (CoreML) entirely locally; click the tile and speak into the focused field. Audio never leaves your Mac.
   - The spoken language is detected automatically across 25 European languages, with punctuation and capitalization
   - One model, downloaded on first use from Settings → Dictation
-  - Floating "Listening…" indicator near the cursor; click or re-press the hotkey to commit, ESC to cancel
+  - Session state lives in the menu bar icon; re-press the hotkey or choose Stop Dictation to commit, ESC to cancel
   - Pastes via `NSPasteboard` + synthesized `Cmd+V` so it works in Electron/Chromium apps (Cursor, VS Code, Slack, Discord, Notion)
   - Pasted text is marked transient so clipboard history managers (Maccy, Paste, Pastebot, Raycast, Alfred) skip the entries
 - **Update checker** — checks GitHub Releases on launch and surfaces an "Update Available" item in the menu; manual "Check for Updates…" also available

@@ -25,7 +25,7 @@ import os
 ///      pauses (see the VAD section below). The `language:` argument is the
 ///      script hint from `DictationLanguageScope`, not a recognition locale.
 ///   3. When the resulting transcript extends what we've already injected,
-///      we type the new portion via `CGEvent.keyboardSetUnicodeString`.
+///      we paste the new portion via `NSPasteboard` + synthesized Cmd+V.
 ///   4. ESC cancels the session (discarding the buffer) and is swallowed so
 ///      it never reaches the app being typed into. Re-triggering Orbit stops
 ///      it and commits. "Stop Dictation" in the menu bar stops it and
@@ -196,10 +196,12 @@ final class SpeechRecognitionService: ObservableObject {
     /// warmup into an active session with the last ~2 seconds of audio
     /// already captured.
     ///
+    /// The ring does not call this. Starting the engine takes the
+    /// microphone and macOS pauses video, so capture begins only from
+    /// `startDictation` when the user picks the dictation tile.
+    ///
     /// Idempotent — calling while warmup or a session is already running
-    /// is a no-op. Silently does nothing if mic permission is not granted
-    /// (we never want to surprise the user with a permission prompt just
-    /// for opening the ring).
+    /// is a no-op. Silently does nothing if mic permission is not granted.
     func warmupAudioCapture() {
         // Don't disturb an active session.
         if isRunning { return }
@@ -306,6 +308,7 @@ final class SpeechRecognitionService: ObservableObject {
         guard isModelDownloaded() else {
             NSLog("[Orbit.speech] start aborted - Parakeet model not downloaded")
             starting = false
+            cancelWarmup()
             onError("Speech model not downloaded. Set it up in Settings → Dictation.")
             showSetupReminderNotification()
             return
@@ -324,6 +327,7 @@ final class SpeechRecognitionService: ObservableObject {
                 NSLog("[Orbit.speech] permission denied")
                 self.starting = false
                 DispatchQueue.main.async {
+                    self.cancelWarmup()
                     self.dictationState = .idle
                     onError("Microphone permission denied")
                     self.showMicPermissionAlert()
@@ -339,6 +343,8 @@ final class SpeechRecognitionService: ObservableObject {
                         self.dictationState = .starting
                         self.beginCapture(onError: onError)
                     }
+                } else {
+                    self.cancelWarmup()
                 }
                 self.starting = false
             }
@@ -814,7 +820,7 @@ final class SpeechRecognitionService: ObservableObject {
     /// something earlier in the session.
     private func handleFlushedTranscript(_ transcript: String) {
         guard !transcript.isEmpty else { return }
-        NSLog("[Orbit.speech] flushed transcript=\(transcript)")
+        NSLog("[Orbit.speech] flushed transcript chars=\(transcript.count)")
 
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") { return }

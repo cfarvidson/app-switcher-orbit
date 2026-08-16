@@ -9,6 +9,16 @@ packages:
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio
     exactVersion: 0.15.5
+schemes:
+  Orbit:
+    build:
+      targets:
+        Orbit: all
+        OrbitTests: [test]
+    test:
+      targets:
+        - OrbitTests
+
 targets:
   Orbit:
     type: application
@@ -43,3 +53,20 @@ targets:
           SWIFT_OPTIMIZATION_LEVEL: "-Onone"
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
+  OrbitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: OrbitTests
+      - path: Orbit/Models
+    dependencies:
+      - package: FluidAudio
+        product: FluidAudio
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.orbit.appswitcher.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual

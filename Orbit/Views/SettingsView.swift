@@ -20,7 +20,7 @@ struct SettingsView: View {
             layoutTab
                 .tabItem { Label("Layout", systemImage: "circle.grid.cross") }
         }
-        .frame(width: 520, height: 800)
+        .frame(minWidth: 520, minHeight: 560)
         .onAppear {
             refreshApps()
             refreshInputDevices()
@@ -395,7 +395,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var dictationShortcutStatusRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Orbit runs Parakeet TDT 0.6B v3 locally via FluidAudio (CoreML on Apple Silicon) - recognition is entirely on-device and bypasses the system Dictation HUD. macOS will prompt for microphone permission the first time you start dictation. Click the floating indicator or press ESC to stop.")
+            Text("Orbit runs Parakeet TDT 0.6B v3 locally via FluidAudio (CoreML on Apple Silicon) - recognition is entirely on-device and bypasses the system Dictation HUD. macOS will prompt for microphone permission the first time you start dictation. Re-press the Orbit hotkey or choose Stop Dictation in the menu bar to commit. Press ESC to cancel.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

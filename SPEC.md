@@ -51,6 +51,9 @@ Orbit/
 └── Resources/
     ├── Assets.xcassets/        # App icon, accent color
     └── Orbit.entitlements
+OrbitTests/
+├── RingLayoutTests.swift              # Characterization of slot resolution and nextAnchorAngle
+└── DictationLanguageScopeTests.swift  # Script-hint mapping
 ```
 
 ## Entry Point
@@ -82,7 +85,7 @@ Responsibilities:
 3. **Hotkey setup** — create `HotkeyService` with a callback that calls `toggleOrbit()`
 4. **Overlay panel** — create a single `OverlayPanel` hosting the `OrbitView`
 5. **Settings observation** — use Combine to observe changes to trigger settings (debounced 100ms) and re-register the hotkey
-6. **Settings window** - opened as a plain `NSWindow` (520x640) with `NSHostingView<SettingsView>`, not SwiftUI's Settings scene
+6. **Settings window** - opened as a plain `NSWindow` (520x720, resizable, min 520x560) with `NSHostingView<SettingsView>`, not SwiftUI's Settings scene
 7. **Toggle logic** — if visible, dismiss; if hidden, get `NSEvent.mouseLocation`, call `viewModel.show()`, then `overlayPanel.showOverlay(at:size:)`. If dictation is currently recording, the trigger stops and commits the session instead of opening the ring.
 8. **Update check** — on launch, calls `UpdateService.checkForUpdate` to check for newer GitHub releases
 
@@ -281,7 +284,7 @@ The service holds a `FluidAudio.AsrManager` (`private var asrManager: AsrManager
 Public API:
 
 - `startDictation(onError:)` - starts a session. Takes no locale and no task. Delegates to the private `startInternal(onError:)`.
-- `warmupAudioCapture()` / `cancelWarmup()` - pre-roll capture, described below.
+- `warmupAudioCapture()` / `cancelWarmup()` - leftover pre-roll helpers. The ring does not call them; opening Orbit must not take the microphone.
 - `stop(reason:flushBuffer:)` - ends a session, optionally transcribing whatever is still buffered.
 - `prewarm()` - loads an already-downloaded model into RAM at launch; never downloads.
 - `downloadAndLoadModel()` - the Settings entry point; downloads if needed, then loads.
@@ -310,7 +313,7 @@ Instead the implementation:
 3. Synthesizes a real `Cmd+V` keystroke via `CGEvent` (virtualKey 9 with `.maskCommand`) posted on `.cghidEventTap` so it flows through the standard keyboard pipeline exactly as if pressed physically.
 4. After 300 ms (a conservative ceiling for paste latency on slow Electron apps), restores the previous pasteboard contents — also marked transient so the restore doesn't create a duplicate entry in clipboard history (the user's original entry already existed before Orbit touched anything).
 
-The pre-flight log line — `inject pre-flight: frontApp=… bundleId=… axTrusted=…` — captures the frontmost app and `AXIsProcessTrusted()` so failures can be diagnosed from logs alone.
+The pre-flight log line — `inject pre-flight: frontApp=… bundleId=… axTrusted=…` — captures the frontmost app and `AXIsProcessTrusted()` so failures can be diagnosed from logs alone. Flushed transcripts are logged by character count only (`flushed transcript chars=N`), never as the spoken text.
 
 ### VAD parameters
 
@@ -427,13 +430,9 @@ At the very top of `beginCapture`, before reading `inputNode.outputFormat`, the 
 
 ### Pre-roll capture (warmup)
 
-When the Orbit ring opens, `OrbitViewModel.show()` calls `SpeechRecognitionService.shared.warmupAudioCapture()` (gated on `dictationEnabled`). This starts the audio engine in a "warmup" mode that fills a 2-second circular `prerollBuffer` (32 000 samples at 16 kHz) without changing `dictationState` away from `.idle` or committing to a session - so the menu bar icon stays at rest during warmup. It is a no-op when a session is already running, when warmup is already active, or when microphone permission has not already been granted - opening the ring must never trigger a permission prompt.
+The ring does **not** start the microphone when it opens. `OrbitViewModel.show()` never calls `warmupAudioCapture()`. Starting `AVAudioEngine` takes the input device; macOS then pauses video in browsers and players. Capture starts only when the user selects the dictation tile, via `startDictation` → `beginCapture`.
 
-If the user clicks the dictation tile, `startInternal` detects warmup is active and calls `promoteWarmupToSession`, which atomically swaps the preroll contents into the session's `audioBuffer` under `audioBufferQueue.sync`. The engine continues running without restart - the user benefits from the audio captured before the click, eliminating the first-words-dropped problem caused by `AVAudioEngine.start()`'s 100-300ms startup latency. Because the engine has been delivering buffers since warmup began, `promoteWarmupToSession` sets `dictationState` straight to `.listening`, skipping `.starting` entirely - there is no startup gap to show.
-
-If the user dismisses the ring without clicking a tile, `OrbitViewModel.dismiss()` calls `cancelWarmup()` which stops the engine and discards the preroll buffer.
-
-**Trade-off:** the macOS mic privacy LED in the menu bar lights for the duration the ring is visible, even if the user doesn't dictate. This is the visible cost of pre-roll capture.
+`warmupAudioCapture()` / `cancelWarmup()` / `promoteWarmupToSession()` still exist on the service. `dismiss()` still calls `cancelWarmup()` as a no-op safety. If warmup is ever started again, `startInternal` can still promote it. Do not wire warmup back to `show()` without a new decision: the product cost is paused video on every Orbit trigger.
 
 ## AudioInputDeviceService
 
@@ -488,7 +487,7 @@ On each `show()`:
 2. A `preferred` list of `(item, preferredAngle)` directions is built: `(.dictation, dictationPreferredAngle)` when `dictationEnabled` and a preference exists, then one entry per pinned app that has a stored preference.
 3. `AppService.runningApps(excluding:pinnedFirst:)` is split into pinned and non-pinned; the non-pinned apps become `others`.
 4. `RingLayout.compute(preferred:others:)` resolves every preference onto the evenly spaced slot nearest it, fills the remaining slots with `others`, and returns `positionedItems` sorted clockwise from 12 o'clock. See `## RingLayout` for the slot-resolution algorithm.
-5. `warmupAudioCapture()` is called when `dictationEnabled` is true.
+5. The microphone is not started. Dictation capture begins only if the user later selects the dictation tile.
 
 ### Angle & Position Math
 
@@ -542,7 +541,7 @@ All monitors are removed on dismiss.
 - Dismisses the overlay
 - After a 50ms delay, branches on the selected `OrbitItem`:
   - `.app(let app)` — calls `app.app.activate()` on the `NSRunningApplication`
-  - `.dictation` - calls `SpeechRecognitionService.shared.startDictation(onError:)`, logging any error
+  - `.dictation` — calls `SpeechRecognitionService.shared.startDictation(onError:)`, which starts the audio engine for the first time in this gesture
 - The delay ensures the overlay is fully hidden before activation or dictation start
 
 ## OrbitView (SwiftUI)
@@ -586,7 +585,7 @@ Displays the single dictation tile. Visually mirrors `AppIconView` so both item 
 
 ## SettingsView
 
-A `TabView` with five tabs (Shortcut, Pinned, Apps, Dictation, Layout). The view sets `.frame(width: 520, height: 800)`; the window `AppDelegate` puts it in is 520x640, so the tab content is taller than the window. `onAppear` refreshes both the running-app list and the audio input device list.
+A `TabView` with five tabs (Shortcut, Pinned, Apps, Dictation, Layout). The view sets `.frame(minWidth: 520, minHeight: 560)` so it fills the hosting window. `AppDelegate` opens that window at 520x720, resizable, with a 520x560 minimum, so the Dictation tab can scroll instead of being clipped. `onAppear` refreshes both the running-app list and the audio input device list.
 
 ### Shortcut Tab
 
@@ -626,7 +625,7 @@ There is no model picker: Orbit ships one model. There is a language selector, b
     - `.loading` → small spinner + "Loading…".
     - `.ready` → green checkmark + "Ready".
     - `.error(message)` → red triangle, the message, and a Retry button.
-  - Explainer caption that Orbit runs Parakeet TDT 0.6B v3 locally via FluidAudio (CoreML on Apple Silicon), that recognition bypasses the system Dictation HUD, that macOS will prompt for microphone permission on first use, and how to stop a session (indicator click or ESC). Followed by a "Microphone Privacy…" button that opens `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`.
+  - Explainer caption that Orbit runs Parakeet TDT 0.6B v3 locally via FluidAudio (CoreML on Apple Silicon), that recognition bypasses the system Dictation HUD, that macOS will prompt for microphone permission on first use, and how to stop a session (re-press the Orbit hotkey or Stop Dictation in the menu bar to commit; ESC to cancel). Followed by a "Microphone Privacy…" button that opens `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`.
 - **Microphone section** (always visible, outside the `if dictationEnabled` block, so the user can pre-configure the mic before enabling dictation):
   - Picker bound to `settings.dictationInputDeviceUID` (`String?`). First option is "System Default" tagged `nil`; remaining options come from `AudioInputDeviceService.listInputDevices()`, each tagged with `Optional(device.uid)` so the stable UID is persisted rather than the transient `AudioDeviceID`.
   - If the stored UID is not in the enumerated list (device disconnected), the picker shows an extra "⚠︎ Not connected (UID)" option so the user is not confused by an apparent silent reset. Selecting "System Default" writes `nil` and clears the warning.
@@ -694,7 +693,9 @@ Key entries:
 - macOS deployment target: 14.0
 - Swift version: 5.9
 - Xcode `ASSETCATALOG_COMPILER_APPICON_NAME` = `AppIcon`
-- Code sign identity: ad-hoc (`"-"`)
+- App code sign identity: Developer ID (`Arvidson Tech AB`, team `D3LY7SL2HW`)
+- `OrbitTests` is a unit-test bundle that compiles `Orbit/Models` plus tests; it does not host `Orbit.app`. Sign identity `-`.
+- Build: `./build.sh`. Test: `./test.sh`.
 
 ## User Flow
 
